@@ -1,0 +1,53 @@
+type: service
+
+# Service name
+name: parakeet-streaming-stt-gpu
+
+# Use pre-built image from registry
+# Replace with your registry URL after building and pushing
+image: ghcr.io/tomheno/parakeet-streaming-stt:latest
+# Or Docker Hub: docker.io/yourusername/parakeet-streaming-stt:latest
+
+# Environment variables
+env:
+  - MODEL_PRECISION=fp16
+  - DEVICE=cuda
+  - LOG_LEVEL=INFO
+
+# Port mapping
+ports:
+  - 8000
+
+# GPU requirements
+resources:
+  gpu:
+    memory: 16GB..24GB  # A10G, L4, T4, or better
+    count: 1
+    name: A10G         # Preferred GPU
+
+  # CPU and RAM
+  memory: 16GB..32GB
+  disk: 50GB
+
+# Health check
+health:
+  path: /healthz
+  port: 8000
+  timeout: 30s
+
+# Scaling
+replicas: 1..10
+min_replicas: 1
+max_replicas: 10
+
+# Auto-scaling based on GPU utilization
+autoscaling:
+  metric: gpu_utilization
+  target: 70
+  min_replicas: 1
+  max_replicas: 10
+
+# Model caching (speeds up deployments)
+cache:
+  - /root/.cache/huggingface
+  - /root/.cache/torch

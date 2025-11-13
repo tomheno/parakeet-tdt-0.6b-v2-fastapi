@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  parakeet-streaming-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: parakeet-streaming-stt:cpu
+    container_name: parakeet-streaming-stt-cpu
+
+    # Environment configuration
+    environment:
+      - MODEL_PRECISION=fp32
+      - DEVICE=cpu
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+
+    # Port mapping
+    ports:
+      - "8000:8000"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import requests; requests.get('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+    # Resource limits (no GPU)
+    mem_limit: 8g
+    memswap_limit: 8g
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Volumes for model caching (optional, speeds up restarts)
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+      - torch-cache:/root/.cache/torch
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  huggingface-cache:
+    driver: local
+  torch-cache:
+    driver: local

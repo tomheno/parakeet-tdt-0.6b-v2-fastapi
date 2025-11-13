@@ -1,0 +1,43 @@
+type: service
+
+# Service name
+name: parakeet-streaming-stt-cpu
+
+# Docker image configuration - dstack builds from Dockerfile
+image: ${{ run.dockerfile }}
+
+# Use CPU-only Dockerfile
+dockerfile: Dockerfile
+
+# Environment variables
+env:
+  - MODEL_PRECISION=fp32
+  - DEVICE=cpu
+  - LOG_LEVEL=INFO
+
+# Port mapping
+ports:
+  - 8000
+
+# CPU-only resources (cheaper, for testing)
+resources:
+  # CPU and RAM
+  cpu: 4..8
+  memory: 8GB..16GB
+  disk: 50GB
+
+# Health check
+health:
+  path: /healthz
+  port: 8000
+  timeout: 30s
+
+# Scaling
+replicas: 1..5
+min_replicas: 1
+max_replicas: 5
+
+# Model caching (speeds up deployments)
+cache:
+  - /root/.cache/huggingface
+  - /root/.cache/torch
