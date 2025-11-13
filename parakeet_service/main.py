@@ -1,35 +1,42 @@
 from fastapi import FastAPI, WebSocket
+from fastapi.responses import JSONResponse
 
 from .model import lifespan
-from .routes import router
 from .config import logger
 
-from parakeet_service.stream_routes import router as stream_router
-from parakeet_service.streaming_server import websocket_streaming_endpoint, setup_model_for_streaming
+from parakeet_service.streaming_server import websocket_streaming_endpoint
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Parakeet-TDT 0.6B v2 STT service",
-        version="0.0.1",
+        title="Parakeet TDT Streaming STT for LiveKit",
+        version="1.0.0",
         description=(
-            "High-accuracy English speech-to-text (FastConformer-TDT) "
-            "with optional word/char/segment timestamps."
+            "Low-latency streaming speech-to-text using NVIDIA Parakeet-TDT "
+            "with cache-aware inference for LiveKit agents."
         ),
         lifespan=lifespan,
     )
-    app.include_router(router)
 
-    # Legacy batch streaming endpoint (VAD-based)
-    app.include_router(stream_router)
+    # Health check endpoint
+    @app.get("/healthz", tags=["health"])
+    async def health_check():
+        """Health check endpoint for monitoring and load balancers."""
+        return JSONResponse({"status": "ok"})
 
-    # New: True streaming endpoint (cache-aware, low-latency)
+    # Streaming endpoint (cache-aware, low-latency for LiveKit)
     @app.websocket("/stream")
     async def stream_endpoint(websocket: WebSocket):
-        """Low-latency streaming STT endpoint using cache-aware inference."""
+        """
+        Low-latency streaming STT endpoint using cache-aware inference.
+
+        Protocol:
+        - Client sends: PCM int16 audio bytes (16kHz mono)
+        - Server sends: JSON {"text": "...", "is_final": false, "session_id": "..."}
+        """
         model = app.state.asr_model
         await websocket_streaming_endpoint(websocket, model)
 
-    logger.info("FastAPI app initialised with streaming endpoints")
+    logger.info("FastAPI app initialised with streaming endpoint for LiveKit")
     return app
 
 

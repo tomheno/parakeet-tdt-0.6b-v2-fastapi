@@ -1,0 +1,45 @@
+# Test Configuration for Parakeet STT
+# Configure endpoints for local and remote testing
+
+# Local development endpoint
+local:
+  host: localhost
+  port: 8000
+  protocol: ws
+  # Full URL will be: ws://localhost:8000
+
+# Remote endpoint (dstack deployment)
+# Uncomment and configure when you have a deployment
+remote:
+  # Example: wss://your-deployment.dstack.cloud
+  url: null
+  # Or configure with host/port
+  # host: your-deployment.dstack.cloud
+  # port: 443
+  # protocol: wss
+
+# Test parameters
+test_params:
+  # Timeout for connection attempts (seconds)
+  connection_timeout: 10
+
+  # Chunk size for audio streaming (seconds)
+  chunk_duration: 0.08  # 80ms
+
+  # Sample rate for audio
+  sample_rate: 16000
+
+  # Maximum latency threshold for tests (ms)
+  max_latency: 2000
+
+  # Number of concurrent clients for load tests
+  concurrent_clients: 5
+
+# Audio test files
+# Optional: specify paths to real audio files for testing
+test_audio:
+  # Example:
+  # - path: /path/to/test1.wav
+  #   expected_text: "hello world"
+  # - path: /path/to/test2.wav
+  #   expected_text: "this is a test"
