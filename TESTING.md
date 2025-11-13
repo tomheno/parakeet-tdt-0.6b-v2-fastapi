@@ -7,7 +7,7 @@ Comprehensive testing guide for Parakeet STT streaming server.
 ### Install Test Dependencies
 
 ```bash
-pip install -r requirements-test.txt
+uv sync --extra test
 ```
 
 ### Run All Tests
@@ -23,7 +23,7 @@ pytest
 Fast unit tests that don't require a running server or model:
 
 ```bash
-pytest -m sanity
+uv run pytest -m sanity
 ```
 
 **What it tests:**
@@ -43,7 +43,7 @@ Tests that require a running local server:
 uvicorn parakeet_service.main:app --host 0.0.0.0 --port 8000
 
 # Terminal 2: Run tests
-pytest -m integration
+uv run pytest -m integration
 ```
 
 **What it tests:**
@@ -61,7 +61,7 @@ Tests for deployed instances:
 
 ```bash
 # Configure remote endpoint in tests/test_config.yml
-pytest -m remote
+uv run pytest -m remote
 ```
 
 **What it tests:**
@@ -95,46 +95,46 @@ remote:
 
 ```bash
 # Only sanity tests
-pytest -m sanity
+uv run pytest -m sanity
 
 # Integration + remote
-pytest -m "integration or remote"
+uv run pytest -m "integration or remote"
 
 # Everything except slow tests
-pytest -m "not slow"
+uv run pytest -m "not slow"
 ```
 
 ### Run Specific Test Files
 
 ```bash
 # Sanity tests only
-pytest tests/test_sanity.py
+uv run pytest tests/test_sanity.py
 
 # Integration tests only
-pytest tests/test_integration.py
+uv run pytest tests/test_integration.py
 
 # Remote tests only
-pytest tests/test_remote.py
+uv run pytest tests/test_remote.py
 ```
 
 ### Run Specific Test Classes
 
 ```bash
 # WebSocket connection tests
-pytest tests/test_integration.py::TestWebSocketConnection
+uv run pytest tests/test_integration.py::TestWebSocketConnection
 
 # Remote streaming tests
-pytest tests/test_remote.py::TestRemoteStreaming
+uv run pytest tests/test_remote.py::TestRemoteStreaming
 ```
 
 ### Run Specific Tests
 
 ```bash
 # Single test
-pytest tests/test_sanity.py::test_imports
+uv run pytest tests/test_sanity.py::test_imports
 
 # Test with verbose output
-pytest -v tests/test_integration.py::TestLatency::test_first_response_latency
+uv run pytest -v tests/test_integration.py::TestLatency::test_first_response_latency
 ```
 
 ## Interactive Testing
@@ -142,7 +142,7 @@ pytest -v tests/test_integration.py::TestLatency::test_first_response_latency
 ### Test with Audio File
 
 ```bash
-python test_streaming_client.py your_audio.wav
+uv run python test_streaming_client.py your_audio.wav
 ```
 
 **Output:**
@@ -172,16 +172,16 @@ Max latency:          350ms
 
 ```bash
 # Local endpoint
-python test_microphone.py
+uv run python test_microphone.py
 
 # Remote endpoint (dstack)
-python test_microphone.py --remote
+uv run python test_microphone.py --remote
 
 # Custom endpoint
-python test_microphone.py --url wss://your-server.com
+uv run python test_microphone.py --url wss://your-server.com
 
 # Specify language
-python test_microphone.py --language es --remote
+uv run python test_microphone.py --language es --remote
 ```
 
 **Interactive prompts:**
@@ -228,7 +228,7 @@ Speak into your microphone. Press Ctrl+C to stop.
 ### Generate Coverage Report
 
 ```bash
-pytest --cov=parakeet_service --cov-report=html --cov-report=term
+uv run pytest --cov=parakeet_service --cov-report=html --cov-report=term
 ```
 
 View HTML report:
@@ -249,10 +249,10 @@ Speed up tests with parallel execution:
 
 ```bash
 # Auto-detect CPU count
-pytest -n auto
+uv run pytest -n auto
 
 # Specific number of workers
-pytest -n 4
+uv run pytest -n 4
 ```
 
 ## Continuous Integration
@@ -278,11 +278,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          pip install -r requirements-test.txt
+          uv sync
+          uv sync --extra test
 
       - name: Run sanity tests
-        run: pytest -m sanity
+        run: uv run pytest -m sanity
 
       - name: Start server
         run: |
@@ -290,10 +290,10 @@ jobs:
           sleep 10
 
       - name: Run integration tests
-        run: pytest -m integration
+        run: uv run pytest -m integration
 
       - name: Generate coverage
-        run: pytest --cov=parakeet_service --cov-report=xml
+        run: uv run pytest --cov=parakeet_service --cov-report=xml
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3
@@ -318,8 +318,8 @@ uvicorn parakeet_service.main:app --log-level debug
 
 ```bash
 # Reinstall dependencies
-pip install -r requirements.txt
-pip install -r requirements-test.txt
+uv sync
+uv sync --extra test
 
 # Check PYTHONPATH
 export PYTHONPATH=/path/to/parakeet-tdt-0.6b-v2-fastapi:$PYTHONPATH
@@ -398,7 +398,7 @@ def test_with_fixtures(sample_audio_chunk, mock_model):
 ### Measure Latency
 
 ```bash
-python test_streaming_client.py test.wav | grep "latency"
+uv run python test_streaming_client.py test.wav | grep "latency"
 ```
 
 ### Stress Test
@@ -406,7 +406,7 @@ python test_streaming_client.py test.wav | grep "latency"
 ```bash
 # Run multiple clients concurrently
 for i in {1..10}; do
-  python test_streaming_client.py test.wav &
+  uv run python test_streaming_client.py test.wav &
 done
 wait
 ```
@@ -415,7 +415,7 @@ wait
 
 ```bash
 # Run tests every 5 minutes
-watch -n 300 'pytest -m integration --tb=no -q'
+watch -n 300 'uv run pytest -m integration --tb=no -q'
 ```
 
 ## Test Metrics
@@ -424,11 +424,11 @@ watch -n 300 'pytest -m integration --tb=no -q'
 
 | Metric | Target | Command |
 |--------|--------|---------|
-| Test execution time | <2 min | `pytest --durations=10` |
-| Code coverage | ≥70% | `pytest --cov` |
-| Integration tests pass rate | 100% | `pytest -m integration` |
-| First response latency | <300ms | `python test_streaming_client.py` |
-| Remote latency | <2s | `pytest -m remote -v` |
+| Test execution time | <2 min | `uv run pytest --durations=10` |
+| Code coverage | ≥70% | `uv run pytest --cov` |
+| Integration tests pass rate | 100% | `uv run pytest -m integration` |
+| First response latency | <300ms | `uv run python test_streaming_client.py` |
+| Remote latency | <2s | `uv run pytest -m remote -v` |
 
 ### Monitoring Dashboard
 
@@ -442,19 +442,19 @@ echo "=== Parakeet STT Test Dashboard ==="
 echo
 
 echo "Sanity Tests:"
-pytest -m sanity -q --tb=no
+uv run pytest -m sanity -q --tb=no
 echo
 
 echo "Integration Tests:"
-pytest -m integration -q --tb=no
+uv run pytest -m integration -q --tb=no
 echo
 
 echo "Coverage:"
-pytest --cov=parakeet_service --cov-report=term-missing | tail -n 20
+uv run pytest --cov=parakeet_service --cov-report=term-missing | tail -n 20
 echo
 
 echo "Latency:"
-python test_streaming_client.py test.wav 2>/dev/null | grep "latency"
+uv run python test_streaming_client.py test.wav 2>/dev/null | grep "latency"
 ```
 
 ## FAQ
@@ -466,7 +466,7 @@ A: Sanity tests don't need GPU. Integration/remote tests work with or without GP
 A: Sanity tests use mocks and will pass. Integration tests need NeMo.
 
 **Q: How do I test a specific dstack deployment?**
-A: Edit `tests/test_config.yml` and set `remote.url`, then run `pytest -m remote`.
+A: Edit `tests/test_config.yml` and set `remote.url`, then run `uv run pytest -m remote`.
 
 **Q: What if microphone test has no output?**
 A: The model needs real speech. Test audio (noise) may not produce transcripts.

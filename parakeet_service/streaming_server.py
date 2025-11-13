@@ -7,7 +7,8 @@ import numpy as np
 import torch
 import asyncio
 import uuid
-from typing import Dict
+import time
+from typing import Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,9 +25,15 @@ except ImportError:
 class StreamingSession:
     """Manages a single streaming STT session with cache-aware inference."""
 
-    def __init__(self, model, session_id: str):
+    def __init__(self, model, session_id: str, silence_timeout: float = 1.5):
         self.session_id = session_id
         self.model = model
+        self.silence_timeout = silence_timeout  # Seconds of silence to trigger final
+
+        # State tracking
+        self.last_transcript = ""
+        self.last_transcript_time = 0.0
+        self.is_speaking = False
 
         if STREAMING_AVAILABLE:
             # Use NeMo's cache-aware streaming buffer
@@ -44,15 +51,21 @@ class StreamingSession:
             self.audio_buffer = []
             logger.info(f"Session {session_id}: Using fallback chunked inference")
 
-    def process_audio(self, audio_chunk: np.ndarray) -> str:
+    def process_audio(self, audio_chunk: np.ndarray) -> Optional[str]:
         """Process audio chunk and return transcript (if any)."""
         if STREAMING_AVAILABLE and self.buffer:
             try:
                 result = self.buffer.infer_signal(audio_chunk)
-                return result if result else ""
+                if result and result.strip():
+                    self.last_transcript = result.strip()
+                    self.last_transcript_time = time.time()
+                    if not self.is_speaking:
+                        self.is_speaking = True
+                    return self.last_transcript
+                return None
             except Exception as e:
                 logger.error(f"Streaming inference error: {e}")
-                return ""
+                return None
         else:
             # Fallback: accumulate and transcribe every N chunks
             self.audio_buffer.append(audio_chunk)
@@ -69,11 +82,33 @@ class StreamingSession:
                     try:
                         with torch.inference_mode():
                             result = self.model.transcribe([tmp.name], batch_size=1)
-                        return result[0] if result else ""
+                        if result and result[0]:
+                            self.last_transcript = result[0]
+                            self.last_transcript_time = time.time()
+                            if not self.is_speaking:
+                                self.is_speaking = True
+                            return self.last_transcript
                     except Exception as e:
                         logger.error(f"Fallback inference error: {e}")
-                        return ""
-            return ""
+            return None
+
+    def check_silence(self) -> bool:
+        """Check if silence timeout has been reached."""
+        if not self.is_speaking:
+            return False
+
+        if self.last_transcript and self.last_transcript_time > 0:
+            silence_duration = time.time() - self.last_transcript_time
+            return silence_duration >= self.silence_timeout
+        return False
+
+    def get_final_transcript(self) -> Optional[str]:
+        """Get final transcript and reset state."""
+        if self.last_transcript:
+            final = self.last_transcript
+            self.reset()
+            return final
+        return None
 
     def reset(self):
         """Reset session state."""
@@ -81,6 +116,10 @@ class StreamingSession:
             self.buffer.reset()
         else:
             self.audio_buffer = []
+
+        self.last_transcript = ""
+        self.last_transcript_time = 0.0
+        self.is_speaking = False
 
 
 # Global session storage
@@ -92,44 +131,123 @@ async def websocket_streaming_endpoint(ws: WebSocket, model):
     WebSocket endpoint for real-time streaming STT.
 
     Protocol:
-    - Client sends: PCM int16 audio bytes (16kHz mono)
-    - Server sends: JSON {"text": "...", "is_final": false}
+    - Client sends:
+      * PCM int16 audio bytes (16kHz mono) for transcription
+      * JSON {"action": "end_utterance"} to force final transcript
+      * JSON {"action": "reset"} to reset session
+    - Server sends:
+      * JSON {"text": "...", "is_final": false, "session_id": "..."} for interim
+      * JSON {"text": "...", "is_final": true, "session_id": "..."} for final
     """
     await ws.accept()
     session_id = str(uuid.uuid4())
 
     # Create streaming session
-    session = StreamingSession(model, session_id)
+    session = StreamingSession(model, session_id, silence_timeout=1.5)
     streaming_sessions[session_id] = session
 
     logger.info(f"New streaming session: {session_id}")
 
-    try:
+    # Task for silence detection
+    silence_check_task = None
+
+    async def check_silence_loop():
+        """Periodically check for silence and send final transcript."""
         while True:
-            # Receive audio chunk (expect PCM int16 bytes)
-            data = await ws.receive_bytes()
+            await asyncio.sleep(0.5)  # Check every 500ms
 
-            # Convert to float32 normalized audio
-            audio_int16 = np.frombuffer(data, dtype=np.int16)
-            audio_float32 = audio_int16.astype(np.float32) / 32768.0
+            if session.check_silence():
+                final_transcript = session.get_final_transcript()
+                if final_transcript:
+                    try:
+                        await ws.send_json({
+                            "text": final_transcript,
+                            "is_final": True,
+                            "session_id": session_id
+                        })
+                        logger.info(f"Session {session_id}: Sent final transcript")
+                    except Exception as e:
+                        logger.error(f"Error sending final transcript: {e}")
+                        break
 
-            # Process through streaming buffer
-            transcript = session.process_audio(audio_float32)
+    try:
+        # Start silence detection task
+        silence_check_task = asyncio.create_task(check_silence_loop())
 
-            # Send back transcript if any
-            if transcript:
-                await ws.send_json({
-                    "text": transcript,
-                    "is_final": False,
-                    "session_id": session_id
-                })
+        while True:
+            # Try to receive data (bytes or text)
+            try:
+                # Check if message is binary (audio) or text (command)
+                message = await asyncio.wait_for(ws.receive(), timeout=0.1)
+
+                if "bytes" in message:
+                    # Audio data
+                    data = message["bytes"]
+
+                    # Convert to float32 normalized audio
+                    audio_int16 = np.frombuffer(data, dtype=np.int16)
+                    audio_float32 = audio_int16.astype(np.float32) / 32768.0
+
+                    # Process through streaming buffer
+                    transcript = session.process_audio(audio_float32)
+
+                    # Send back interim transcript if any
+                    if transcript:
+                        await ws.send_json({
+                            "text": transcript,
+                            "is_final": False,
+                            "session_id": session_id
+                        })
+
+                elif "text" in message:
+                    # Command message
+                    import json
+                    try:
+                        command = json.loads(message["text"])
+                        action = command.get("action")
+
+                        if action == "end_utterance":
+                            # Force final transcript
+                            final_transcript = session.get_final_transcript()
+                            if final_transcript:
+                                await ws.send_json({
+                                    "text": final_transcript,
+                                    "is_final": True,
+                                    "session_id": session_id
+                                })
+
+                        elif action == "reset":
+                            # Reset session
+                            session.reset()
+                            await ws.send_json({
+                                "status": "reset",
+                                "session_id": session_id
+                            })
+
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON command: {message['text']}")
+
+            except asyncio.TimeoutError:
+                # No message received, continue
+                continue
 
     except WebSocketDisconnect:
         logger.info(f"Session {session_id} disconnected")
     except Exception as e:
-        logger.error(f"Error in session {session_id}: {e}")
-        await ws.close(code=1011, reason=str(e))
+        logger.error(f"Error in session {session_id}: {e}", exc_info=True)
+        try:
+            await ws.close(code=1011, reason=str(e))
+        except:
+            pass
     finally:
+        # Cancel silence check task
+        if silence_check_task:
+            silence_check_task.cancel()
+            try:
+                await silence_check_task
+            except asyncio.CancelledError:
+                pass
+
         # Cleanup
         if session_id in streaming_sessions:
             del streaming_sessions[session_id]

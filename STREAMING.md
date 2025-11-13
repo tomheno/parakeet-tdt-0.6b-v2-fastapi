@@ -7,7 +7,7 @@ Low-latency (<300ms) streaming speech-to-text using NVIDIA Parakeet TDT with cac
 ### 1. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 ### 2. Start Server
@@ -61,7 +61,7 @@ Chunk size: 1280 samples (80ms)
 ### Installation
 
 ```bash
-pip install livekit-agents
+uv pip install livekit-agents
 ```
 
 ### Usage
@@ -155,7 +155,7 @@ If NeMo's streaming utils aren't available, the code falls back to chunked infer
 
 ```bash
 # Update NeMo to latest
-pip install --upgrade nemo_toolkit[asr]
+uv pip install --upgrade nemo_toolkit[asr]
 ```
 
 ### High latency
@@ -169,9 +169,9 @@ pip install --upgrade nemo_toolkit[asr]
 
 ```bash
 # Install all dependencies
-pip install fastapi uvicorn websockets soundfile
-pip install nemo_toolkit[asr]
-pip install livekit-agents
+uv pip install fastapi uvicorn websockets soundfile
+uv pip install nemo_toolkit[asr]
+uv pip install livekit-agents
 ```
 
 ## Files

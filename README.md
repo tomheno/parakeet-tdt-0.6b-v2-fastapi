@@ -20,31 +20,40 @@ Low-latency (<300ms) streaming speech-to-text using NVIDIA's Parakeet-TDT model,
 git clone https://github.com/tomheno/parakeet-tdt-0.6b-v2-fastapi.git
 cd parakeet-tdt-0.6b-v2-fastapi
 
+# Install UV (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # Install dependencies
-pip install -r requirements.txt
+uv sync
+
+# Or with LiveKit support
+uv sync --extra livekit
 ```
 
 ### Run Server
 
 ```bash
 # Local development
-uvicorn parakeet_service.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn parakeet_service.main:app --host 0.0.0.0 --port 8000
 
 # With GPU
-MODEL_PRECISION=fp16 DEVICE=cuda uvicorn parakeet_service.main:app
+MODEL_PRECISION=fp16 DEVICE=cuda uv run uvicorn parakeet_service.main:app
 ```
 
 ### Test
 
 ```bash
+# Install test dependencies
+uv sync --extra test
+
 # Sanity tests (no server needed)
-pytest -m sanity
+uv run pytest -m sanity
 
 # Integration tests (requires running server)
-pytest -m integration
+uv run pytest -m integration
 
 # Test with microphone
-python test_microphone.py
+uv run python test_microphone.py
 ```
 
 ## LiveKit Integration
@@ -148,7 +157,7 @@ docker-compose -f docker-compose.gpu.yml up
 ### dstack (Multi-cloud)
 
 ```bash
-pip install dstack
+uv tool install dstack
 dstack init
 dstack run .
 ```
@@ -217,37 +226,40 @@ MODEL_NAME=nvidia/parakeet-tdt-0.6b-v2
 ### Run All Tests
 
 ```bash
-pip install -r requirements-test.txt
-pytest
+# Install test dependencies
+uv sync --extra test
+
+# Run all tests
+uv run pytest
 ```
 
 ### Test Categories
 
 ```bash
 # Sanity tests (fast, no server)
-pytest -m sanity
+uv run pytest -m sanity
 
 # Integration tests (requires server)
-pytest -m integration
+uv run pytest -m integration
 
 # Remote tests (requires dstack deployment)
-pytest -m remote
+uv run pytest -m remote
 ```
 
 ### Interactive Testing
 
 ```bash
 # Test with audio file
-python test_streaming_client.py audio.wav
+uv run python test_streaming_client.py audio.wav
 
 # Test with microphone (local)
-python test_microphone.py
+uv run python test_microphone.py
 
 # Test with microphone (dstack)
-python test_microphone.py --remote
+uv run python test_microphone.py --remote
 
 # Test custom endpoint
-python test_microphone.py --url wss://your-server.com
+uv run python test_microphone.py --url wss://your-server.com
 ```
 
 ## Architecture
@@ -312,7 +324,7 @@ Parakeet TDT supports 25+ languages with auto-detection:
 ### Import Errors
 
 ```bash
-pip install --upgrade nemo_toolkit[asr]
+uv pip install --upgrade nemo_toolkit[asr]
 ```
 
 ### GPU Not Detected

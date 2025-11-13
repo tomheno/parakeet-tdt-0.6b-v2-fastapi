@@ -1,5 +1,5 @@
 # Parakeet TDT Streaming STT - GPU-enabled Dockerfile
-# Optimized for NVIDIA GPUs (RunPod, AWS, GCP, etc.)
+# Optimized for NVIDIA GPUs using UV package manager
 
 FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
 
@@ -10,35 +10,25 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 \
     python3.10-venv \
-    python3-pip \
+    curl \
     git \
     ffmpeg \
     libsndfile1 \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.10 as default
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 
+# Install UV (fast Python package installer)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
+
 WORKDIR /app
 
-# Copy requirements first (for layer caching)
-COPY requirements.txt .
-
-# Install PyTorch with CUDA 12.1 support
-RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir \
-        torch==2.1.0 \
-        torchaudio==2.1.0 \
-        --index-url https://download.pytorch.org/whl/cu121
-
-# Install NeMo and other dependencies
-RUN pip3 install --no-cache-dir \
-    nemo_toolkit[asr]==1.23.0 \
-    && pip3 install --no-cache-dir -r requirements.txt \
-    && pip3 cache purge
-
-# Copy application code
+# Copy project files
+COPY pyproject.toml .
 COPY parakeet_service ./parakeet_service
 COPY livekit_plugin.py .
 COPY test_streaming_client.py .
@@ -46,6 +36,23 @@ COPY STREAMING.md .
 
 # Copy environment config
 COPY .env.example .env
+
+# Create virtual environment and install dependencies with UV
+RUN uv venv /opt/venv
+
+# Activate virtual environment
+ENV PATH="/opt/venv/bin:$PATH" \
+    VIRTUAL_ENV="/opt/venv"
+
+# Install PyTorch with CUDA 12.1 support using UV
+RUN uv pip install \
+    torch==2.1.0 \
+    torchaudio==2.1.0 \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Install project dependencies with UV
+# Note: UV is much faster than pip for dependency resolution
+RUN uv pip install -e ".[livekit]"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

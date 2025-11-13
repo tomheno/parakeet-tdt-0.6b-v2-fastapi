@@ -1,10 +1,11 @@
 """
 LiveKit STT plugin for Parakeet TDT streaming inference.
+Connects to Parakeet WebSocket server for speech-to-text.
 
 Usage:
     from livekit_plugin import ParakeetSTT
 
-    stt = ParakeetSTT()
+    stt = ParakeetSTT(url="ws://localhost:8000/stream")
     async with stt.stream() as stream:
         # Feed audio frames
         stream.push_frame(audio_frame)
@@ -17,10 +18,10 @@ Usage:
 from __future__ import annotations
 import asyncio
 import numpy as np
-import torch
 from dataclasses import dataclass
 from typing import Optional
 import logging
+import json
 
 # LiveKit imports
 try:
@@ -31,16 +32,13 @@ except ImportError:
     LIVEKIT_AVAILABLE = False
     logging.warning("LiveKit not installed. Plugin will not work.")
 
-# NeMo imports
-import nemo.collections.asr as nemo_asr
-
-# NeMo streaming
+# WebSocket client
 try:
-    from nemo.collections.asr.parts.utils.streaming_utils import CacheAwareStreamingAudioBuffer
-    STREAMING_AVAILABLE = True
+    import websockets
+    WEBSOCKETS_AVAILABLE = True
 except ImportError:
-    STREAMING_AVAILABLE = False
-    logging.warning("NeMo streaming not available")
+    WEBSOCKETS_AVAILABLE = False
+    logging.warning("websockets not installed. Install with: uv pip install websockets")
 
 logger = logging.getLogger(__name__)
 
@@ -48,33 +46,27 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ParakeetOptions:
     """Configuration for Parakeet STT."""
-    model_name: str = "nvidia/parakeet-tdt-0.6b-v3"
-    chunk_size: float = 0.08  # 80ms
-    shift_size: float = 0.04  # 40ms overlap
-    left_chunks: int = 4      # context chunks
+    url: str = "ws://localhost:8000/stream"  # WebSocket server URL
     language: str = "en"
-    device: str = "cuda"
-    precision: str = "fp16"   # fp16 or fp32
+    sample_rate: int = 16000
+    silence_timeout: float = 1.5  # Seconds of silence before end_utterance
 
 
-if LIVEKIT_AVAILABLE:
+if LIVEKIT_AVAILABLE and WEBSOCKETS_AVAILABLE:
     class ParakeetSTT(stt.STT):
         """
         Parakeet TDT streaming STT for LiveKit agents.
 
-        Provides low-latency (<300ms) speech-to-text using NVIDIA's Parakeet-TDT model.
+        Connects to Parakeet WebSocket server for low-latency (<300ms) speech-to-text.
         """
 
         def __init__(
             self,
             *,
-            model_name: str = "nvidia/parakeet-tdt-0.6b-v3",
-            chunk_size: float = 0.08,
-            shift_size: float = 0.04,
-            left_chunks: int = 4,
+            url: str = "ws://localhost:8000/stream",
             language: str = "en",
-            device: str = "cuda",
-            precision: str = "fp16"
+            sample_rate: int = 16000,
+            silence_timeout: float = 1.5
         ):
             super().__init__(
                 capabilities=stt.STTCapabilities(
@@ -84,40 +76,13 @@ if LIVEKIT_AVAILABLE:
             )
 
             self._opts = ParakeetOptions(
-                model_name=model_name,
-                chunk_size=chunk_size,
-                shift_size=shift_size,
-                left_chunks=left_chunks,
+                url=url,
                 language=language,
-                device=device,
-                precision=precision
+                sample_rate=sample_rate,
+                silence_timeout=silence_timeout
             )
 
-            # Load model
-            logger.info(f"Loading Parakeet model: {model_name}")
-            self._model = nemo_asr.models.ASRModel.from_pretrained(
-                model_name,
-                map_location=device
-            )
-
-            # Set precision
-            if precision == "fp16" and torch.cuda.is_available():
-                self._model = self._model.half()
-                logger.info("Using FP16 precision")
-
-            self._model.eval()
-
-            # Enable streaming attention if available
-            try:
-                self._model.change_attention_model(
-                    self_attention_model="rel_pos_local_attn",
-                    att_context_size=[256, 64]
-                )
-                logger.info("Enabled cache-aware attention")
-            except Exception as e:
-                logger.warning(f"Could not enable cache-aware attention: {e}")
-
-            logger.info("Parakeet STT initialized")
+            logger.info(f"Parakeet STT initialized with URL: {url}")
 
         def stream(
             self,
@@ -128,7 +93,7 @@ if LIVEKIT_AVAILABLE:
             return ParakeetStream(
                 stt=self,
                 opts=self._opts,
-                model=self._model
+                language=language or self._opts.language
             )
 
 
@@ -140,125 +105,180 @@ if LIVEKIT_AVAILABLE:
             *,
             stt: ParakeetSTT,
             opts: ParakeetOptions,
-            model
+            language: str
         ):
-            super().__init__(stt=stt, sample_rate=16000)
+            super().__init__(stt=stt, sample_rate=opts.sample_rate)
 
             self._opts = opts
-            self._model = model
-            self._buffer: Optional[CacheAwareStreamingAudioBuffer] = None
+            self._language = language
+            self._websocket: Optional[websockets.WebSocketClientProtocol] = None
+            self._ws_task: Optional[asyncio.Task] = None
             self._speaking = False
             self._last_transcript = ""
 
         async def _run(self):
             """Main processing loop."""
-            # Initialize streaming buffer
-            if STREAMING_AVAILABLE:
-                self._buffer = CacheAwareStreamingAudioBuffer(
-                    model=self._model,
-                    chunk_size=self._opts.chunk_size,
-                    shift_size=self._opts.shift_size,
-                    left_chunks=self._opts.left_chunks,
-                    online_normalization=True
-                )
-                logger.info("Using CacheAwareStreamingAudioBuffer")
-            else:
-                logger.warning("Streaming buffer not available, using fallback")
-                self._audio_buffer = []
-
             try:
+                # Connect to WebSocket server
+                logger.info(f"Connecting to Parakeet server: {self._opts.url}")
+                self._websocket = await websockets.connect(
+                    self._opts.url,
+                    ping_interval=None,  # Disable ping/pong
+                    close_timeout=5
+                )
+                logger.info("Connected to Parakeet server")
+
+                # Start WebSocket receiver task
+                self._ws_task = asyncio.create_task(self._receive_loop())
+
+                # Process audio frames
                 async for frame in self._input_ch:
                     if isinstance(frame, rtc.AudioFrame):
                         await self._process_frame(frame)
                     elif isinstance(frame, self._FlushSentinel):
-                        # End of speech - send final transcript
+                        # End of speech - request final transcript
                         if self._speaking:
-                            await self._emit_final()
+                            await self._end_utterance()
 
             except Exception as e:
                 logger.error(f"Error in streaming: {e}", exc_info=True)
             finally:
                 # Cleanup
-                if self._buffer:
-                    self._buffer.reset()
+                await self._cleanup()
 
         async def _process_frame(self, frame: rtc.AudioFrame):
-            """Process a single audio frame."""
-            # Convert to numpy array
-            audio_data = np.frombuffer(
-                frame.data.tobytes(),
-                dtype=np.int16
-            ).astype(np.float32) / 32768.0
+            """Process a single audio frame and send to WebSocket."""
+            if not self._websocket:
+                return
 
-            # Process through streaming buffer
-            if self._buffer:
-                try:
-                    with torch.inference_mode():
-                        transcript = self._buffer.infer_signal(audio_data)
+            try:
+                # Convert to numpy array (int16 PCM)
+                audio_data = np.frombuffer(
+                    frame.data.tobytes(),
+                    dtype=np.int16
+                )
 
-                    if transcript and transcript != self._last_transcript:
-                        # Start of speech event
-                        if not self._speaking:
-                            self._speaking = True
-                            self._event_ch.send_nowait(
-                                stt.SpeechEvent(
-                                    type=stt.SpeechEventType.START_OF_SPEECH
-                                )
-                            )
+                # Send to WebSocket server
+                await self._websocket.send(audio_data.tobytes())
 
-                        # Interim transcript
-                        self._event_ch.send_nowait(
-                            stt.SpeechEvent(
-                                type=stt.SpeechEventType.INTERIM_TRANSCRIPT,
-                                alternatives=[
-                                    stt.SpeechData(
-                                        text=transcript,
-                                        language=self._opts.language
+            except Exception as e:
+                logger.error(f"Error processing frame: {e}")
+
+        async def _receive_loop(self):
+            """Receive transcripts from WebSocket server."""
+            if not self._websocket:
+                return
+
+            try:
+                async for message in self._websocket:
+                    if isinstance(message, str):
+                        # JSON message from server
+                        try:
+                            data = json.loads(message)
+                            text = data.get("text", "")
+                            is_final = data.get("is_final", False)
+
+                            if text:
+                                # Start of speech event
+                                if not self._speaking:
+                                    self._speaking = True
+                                    self._event_ch.send_nowait(
+                                        stt.SpeechEvent(
+                                            type=stt.SpeechEventType.START_OF_SPEECH
+                                        )
                                     )
-                                ]
-                            )
-                        )
-                        self._last_transcript = transcript
 
-                except Exception as e:
-                    logger.error(f"Inference error: {e}")
-            else:
-                # Fallback: accumulate audio
-                self._audio_buffer.append(audio_data)
+                                # Interim or final transcript
+                                if is_final:
+                                    # Final transcript
+                                    self._event_ch.send_nowait(
+                                        stt.SpeechEvent(
+                                            type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                                            alternatives=[
+                                                stt.SpeechData(
+                                                    text=text,
+                                                    language=self._language
+                                                )
+                                            ]
+                                        )
+                                    )
 
-        async def _emit_final(self):
-            """Emit final transcript event."""
-            if self._last_transcript:
-                self._event_ch.send_nowait(
-                    stt.SpeechEvent(
-                        type=stt.SpeechEventType.FINAL_TRANSCRIPT,
-                        alternatives=[
-                            stt.SpeechData(
-                                text=self._last_transcript,
-                                language=self._opts.language
-                            )
-                        ]
-                    )
-                )
+                                    # End of speech
+                                    self._event_ch.send_nowait(
+                                        stt.SpeechEvent(
+                                            type=stt.SpeechEventType.END_OF_SPEECH
+                                        )
+                                    )
 
-            # End of speech
-            self._event_ch.send_nowait(
-                stt.SpeechEvent(
-                    type=stt.SpeechEventType.END_OF_SPEECH
-                )
-            )
+                                    # Reset state
+                                    self._speaking = False
+                                    self._last_transcript = ""
 
-            # Reset state
-            self._speaking = False
-            self._last_transcript = ""
-            if self._buffer:
-                self._buffer.reset()
+                                else:
+                                    # Interim transcript
+                                    self._event_ch.send_nowait(
+                                        stt.SpeechEvent(
+                                            type=stt.SpeechEventType.INTERIM_TRANSCRIPT,
+                                            alternatives=[
+                                                stt.SpeechData(
+                                                    text=text,
+                                                    language=self._language
+                                                )
+                                            ]
+                                        )
+                                    )
+                                    self._last_transcript = text
+
+                        except json.JSONDecodeError:
+                            logger.warning(f"Invalid JSON from server: {message}")
+
+            except Exception as e:
+                logger.error(f"Error receiving from WebSocket: {e}")
+
+        async def _end_utterance(self):
+            """Request final transcript from server."""
+            if not self._websocket:
+                return
+
+            try:
+                # Send end_utterance command
+                await self._websocket.send(json.dumps({"action": "end_utterance"}))
+            except Exception as e:
+                logger.error(f"Error sending end_utterance: {e}")
+
+        async def _cleanup(self):
+            """Cleanup WebSocket connection."""
+            # Cancel receiver task
+            if self._ws_task:
+                self._ws_task.cancel()
+                try:
+                    await self._ws_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Close WebSocket
+            if self._websocket:
+                try:
+                    await self._websocket.close()
+                except:
+                    pass
+
+            logger.info("Parakeet stream cleaned up")
 
 else:
-    # Stub classes if LiveKit not available
+    # Stub classes if dependencies not available
     class ParakeetSTT:
         def __init__(self, **kwargs):
-            raise ImportError("LiveKit SDK not installed. Install with: pip install livekit-agents")
+            missing = []
+            if not LIVEKIT_AVAILABLE:
+                missing.append("livekit-agents")
+            if not WEBSOCKETS_AVAILABLE:
+                missing.append("websockets")
+
+            raise ImportError(
+                f"Required packages not installed: {', '.join(missing)}. "
+                f"Install with: uv sync --extra livekit"
+            )
 
     class ParakeetStream:
         pass

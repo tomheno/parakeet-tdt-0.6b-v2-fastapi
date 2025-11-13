@@ -11,7 +11,7 @@ dstack provides multi-cloud GPU deployment with auto-scaling.
 #### Prerequisites
 
 ```bash
-pip install dstack
+uv tool install dstack
 dstack server
 ```
 
@@ -350,7 +350,7 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Install dstack
-        run: pip install dstack
+        run: uv tool install dstack
 
       - name: Deploy
         env:
