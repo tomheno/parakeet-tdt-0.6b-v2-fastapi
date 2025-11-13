@@ -27,39 +27,27 @@ ENV PATH="/root/.cargo/bin:$PATH"
 
 WORKDIR /app
 
-# Copy project files
+# Copy project configuration
 COPY pyproject.toml .
+COPY README.md .
+
+# Copy application code
 COPY parakeet_service ./parakeet_service
 COPY livekit_plugin.py .
 COPY test_streaming_client.py .
-COPY STREAMING.md .
 
 # Copy environment config
 COPY .env.example .env
 
-# Create virtual environment and install dependencies with UV
-RUN uv venv /opt/venv
-
-# Activate virtual environment
-ENV PATH="/opt/venv/bin:$PATH" \
-    VIRTUAL_ENV="/opt/venv"
-
-# Install PyTorch with CUDA 12.1 support using UV
-RUN uv pip install \
-    torch==2.1.0 \
-    torchaudio==2.1.0 \
-    --index-url https://download.pytorch.org/whl/cu121
-
-# Install project dependencies with UV
-# Note: UV is much faster than pip for dependency resolution
-RUN uv pip install -e ".[livekit]"
+# Install dependencies using UV
+# This reads pyproject.toml and installs everything including PyTorch from CUDA index
+RUN uv sync --extra livekit
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     MODEL_PRECISION=fp16 \
     DEVICE=cuda \
-    BATCH_SIZE=4 \
     LOG_LEVEL=INFO
 
 # Health check
@@ -69,8 +57,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # Expose port
 EXPOSE 8000
 
-# Run server
-CMD ["uvicorn", "parakeet_service.main:app", \
+# Run server with UV
+CMD ["uv", "run", "uvicorn", "parakeet_service.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--workers", "1"]
