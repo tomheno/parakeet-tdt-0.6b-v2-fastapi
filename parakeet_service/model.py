@@ -31,14 +31,21 @@ async def lifespan(app):
     with torch.inference_mode():
         # Determine precision
         dtype = torch.float16 if MODEL_PRECISION == "fp16" else torch.float32
-        
+
         # Load model with configurable device and precision
         model = nemo_asr.models.ASRModel.from_pretrained(
-            MODEL_NAME, 
+            MODEL_NAME,
             map_location=DEVICE
         ).to(dtype=dtype)
         logger.info("Loaded model with %s weights on %s", MODEL_PRECISION.upper(), DEVICE)
-        
+
+    # Configure for streaming (cache-aware attention)
+    try:
+        from parakeet_service.streaming_server import setup_model_for_streaming
+        model = setup_model_for_streaming(model)
+    except Exception as e:
+        logger.warning("Could not configure streaming mode: %s", e)
+
     # Aggressive cleanup
     gc.collect()
     torch.cuda.empty_cache()

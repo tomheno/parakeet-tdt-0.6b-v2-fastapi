@@ -9,3 +9,7 @@ pytest
 python-multipart
 ffmpeg-python
 python-dotenv
+websockets
+soundfile
+nemo_toolkit[asr]
+livekit-agents

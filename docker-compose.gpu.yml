@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  parakeet-streaming:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    image: parakeet-streaming-stt:gpu
+    container_name: parakeet-streaming-stt
+
+    # GPU support (requires nvidia-docker)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Environment configuration
+    environment:
+      - MODEL_PRECISION=fp16
+      - DEVICE=cuda
+      - BATCH_SIZE=4
+      - LOG_LEVEL=INFO
+      - TARGET_SR=16000
+      - MAX_AUDIO_DURATION=30
+      - PYTHONUNBUFFERED=1
+
+    # Port mapping
+    ports:
+      - "8000:8000"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import requests; requests.get('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Resource limits
+    mem_limit: 16g
+    memswap_limit: 16g
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Volumes for model caching (optional, speeds up restarts)
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+      - torch-cache:/root/.cache/torch
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  huggingface-cache:
+    driver: local
+  torch-cache:
+    driver: local
