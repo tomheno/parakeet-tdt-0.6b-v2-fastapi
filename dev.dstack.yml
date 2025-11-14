@@ -12,13 +12,11 @@ init:
   # Install UV (fast Python package manager)
   - curl -LsSf https://astral.sh/uv/install.sh | sh
   - export PATH="/root/.cargo/bin:$PATH"
-
   # Sync all dependencies using UV
   - uv sync --all-extras
-
-  # Verify installation
-  - uv run python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA available: {torch.cuda.is_available()}')"
-  - uv run python -c "import nemo; print(f'NeMo {nemo.__version__}')"
+  # Verify PyTorch CUDA availability
+  - uv run python -c 'import torch; print("PyTorch version:", torch.__version__, "CUDA available:", torch.cuda.is_available())'
+  - uv run python -c 'import nemo; print("NeMo version:", nemo.__version__)'
 
 # Environment variables
 env:
