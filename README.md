@@ -148,18 +148,12 @@ docker build -f Dockerfile.gpu -t parakeet-stt:gpu .
 docker run --gpus all -p 8000:8000 parakeet-stt:gpu
 ```
 
-### Docker Compose
+### dstack (Cloud Deployment)
 
 ```bash
-docker-compose -f docker-compose.gpu.yml up
-```
-
-### dstack (Multi-cloud)
-
-```bash
+# See DEPLOYMENT.md for complete guide
 uv tool install dstack
-dstack init
-dstack run .
+dstack apply -f .dstack.yml
 ```
 
 Configuration in `.dstack.yml`:
@@ -296,8 +290,7 @@ uv run python test_microphone.py --url wss://your-server.com
 
 ## Documentation
 
-- [STREAMING.md](STREAMING.md) - Detailed streaming guide
-- [DEPLOYMENT.md](DEPLOYMENT.md) - Multi-cloud deployment
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Development and production deployment guide
 - [TESTING.md](TESTING.md) - Complete testing guide
 
 ## Supported Languages
