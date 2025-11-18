@@ -59,11 +59,12 @@ This creates a managed pool of GPU instances with:
 
 #### Set up authentication
 ```bash
-# Export GitHub token
-export GITHUB_TOKEN="ghp_your_token_here"
+# Login to Docker Hub
+docker login -u tomheno
 
-# Or login manually
-echo $GITHUB_TOKEN | docker login ghcr.io -u tomheno --password-stdin
+# Or use environment variable
+export DOCKER_PASSWORD="your_docker_hub_token"
+echo $DOCKER_PASSWORD | docker login -u tomheno --password-stdin
 ```
 
 #### Build and push
@@ -78,7 +79,7 @@ chmod +x build-dev-image.sh
 docker buildx build \
   --platform linux/amd64 \
   -f Dockerfile.dev \
-  -t ghcr.io/tomheno/parakeet-dev:latest \
+  -t tomheno/parakeet-dev:latest \
   --push .
 ```
 
@@ -299,7 +300,7 @@ git push
 
 # 2. Build production image
 docker buildx build --platform linux/amd64 -f Dockerfile.gpu \
-  -t ghcr.io/tomheno/parakeet-streaming-stt:latest --push .
+  -t tomheno/parakeet-streaming-stt:latest --push .
 
 # 3. Deploy service
 dstack apply -f .dstack.yml

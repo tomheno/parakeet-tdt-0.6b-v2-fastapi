@@ -8,27 +8,14 @@ Complete guide for building Docker images on Mac (M1/M2/Intel) and deploying to 
 - dstack CLI: `uv tool install dstack`
 - Registry account (GitHub Container Registry, Docker Hub, etc.)
 
-## Step 1: Setup Registry
-
-### Option A: GitHub Container Registry (Recommended)
-
-```bash
-# Login to GitHub Container Registry
-echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
-
-# Or create personal access token at:
-# https://github.com/settings/tokens
-# Scopes needed: write:packages, read:packages
-```
-
-### Option B: Docker Hub
+## Step 1: Setup Docker Hub
 
 ```bash
 # Login to Docker Hub
-docker login
+docker login -u tomheno
 
-# Or with token
-echo $DOCKER_TOKEN | docker login -u YOUR_USERNAME --password-stdin
+# Or with token/password
+echo $DOCKER_PASSWORD | docker login -u tomheno --password-stdin
 ```
 
 ## Step 2: Build Multi-Architecture Image on Mac
@@ -43,8 +30,8 @@ docker buildx create --use --name multiarch
 docker buildx build \
   --platform linux/amd64 \
   --file Dockerfile.gpu \
-  --tag ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:latest \
-  --tag ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:v1.0.0 \
+  --tag tomheno/parakeet-streaming-stt:latest \
+  --tag tomheno/parakeet-streaming-stt:v1.0.0 \
   --push \
   .
 
@@ -85,10 +72,10 @@ docker run --gpus all -p 8000:8000 parakeet-stt:local
 docker buildx build \
   --platform linux/amd64 \
   --file Dockerfile.gpu \
-  --tag ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:$(git rev-parse --short HEAD) \
-  --tag ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:latest \
-  --cache-from type=registry,ref=ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:buildcache \
-  --cache-to type=registry,ref=ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:buildcache,mode=max \
+  --tag tomheno/parakeet-streaming-stt:$(git rev-parse --short HEAD) \
+  --tag tomheno/parakeet-streaming-stt:latest \
+  --cache-from type=registry,ref=tomheno/parakeet-streaming-stt:buildcache \
+  --cache-to type=registry,ref=tomheno/parakeet-streaming-stt:buildcache,mode=max \
   --push \
   .
 ```
@@ -97,7 +84,7 @@ docker buildx build \
 
 ```bash
 # Check image in registry
-docker manifest inspect ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:latest
+docker manifest inspect tomheno/parakeet-streaming-stt:latest
 
 # Should show: "architecture": "amd64"
 ```
@@ -111,7 +98,7 @@ type: service
 name: parakeet-streaming-stt-gpu
 
 # Your registry image
-image: ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:latest
+image: tomheno/parakeet-streaming-stt:latest
 
 # ... rest of config
 ```
@@ -301,7 +288,7 @@ uv run pytest -m sanity
 docker buildx build \
   --platform linux/amd64 \
   --file Dockerfile.gpu \
-  --tag ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:dev \
+  --tag tomheno/parakeet-streaming-stt:dev \
   --push \
   .
 
@@ -315,8 +302,8 @@ uv run python test_microphone.py --url wss://your-url.com/stream
 docker buildx build \
   --platform linux/amd64 \
   --file Dockerfile.gpu \
-  --tag ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:v1.0.0 \
-  --tag ghcr.io/YOUR_USERNAME/parakeet-streaming-stt:latest \
+  --tag tomheno/parakeet-streaming-stt:v1.0.0 \
+  --tag tomheno/parakeet-streaming-stt:latest \
   --push \
   .
 ```
@@ -325,7 +312,7 @@ docker buildx build \
 
 ```bash
 # Build on Mac for GPU servers
-docker buildx build --platform linux/amd64 -f Dockerfile.gpu -t ghcr.io/USER/app:latest --push .
+docker buildx build --platform linux/amd64 -f Dockerfile.gpu -t tomheno/parakeet-streaming-stt:latest --push .
 
 # Deploy with dstack
 dstack run -f .dstack-registry.yml
@@ -356,10 +343,10 @@ docker buildx create --use --name multiarch
 docker buildx inspect --bootstrap
 
 # Verify image architecture
-docker manifest inspect ghcr.io/USER/app:latest | grep architecture
+docker manifest inspect tomheno/parakeet-streaming-stt:latest | grep architecture
 
 # Test image locally (if you have GPU)
-docker run --gpus all -p 8000:8000 ghcr.io/USER/app:latest
+docker run --gpus all -p 8000:8000 tomheno/parakeet-streaming-stt:latest
 ```
 
 ## Next Steps

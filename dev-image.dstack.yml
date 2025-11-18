@@ -3,14 +3,14 @@ name: parakeet-dev
 
 ide: vscode
 
-# Use pre-built Docker image with all dependencies
-# Build and push first: docker buildx build --platform linux/amd64 -f Dockerfile.gpu -t ghcr.io/tomheno/parakeet-dev:latest --push .
-image: ghcr.io/tomheno/parakeet-dev:latest
+# Use pre-built Docker image with all dependencies from Docker Hub
+# Build and push first: ./build-dev-image.sh latest
+image: tomheno/parakeet-dev:latest
 
-# Uncomment and add your GitHub token for private registry
+# For private images, uncomment and add your Docker Hub credentials:
 # registry_auth:
 #   username: tomheno
-#   password: ${{ env.GITHUB_TOKEN }}
+#   password: ${{ env.DOCKER_PASSWORD }}
 
 # Use fleet for cost optimization
 fleets:

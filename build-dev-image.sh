@@ -2,20 +2,20 @@
 set -e
 
 # Configuration
-IMAGE_NAME="ghcr.io/tomheno/parakeet-dev"
+IMAGE_NAME="tomheno/parakeet-dev"
 TAG="${1:-latest}"
 FULL_IMAGE="${IMAGE_NAME}:${TAG}"
 
 echo "Building development image: ${FULL_IMAGE}"
 echo "============================================"
 
-# Login to GitHub Container Registry
-echo "Logging in to GitHub Container Registry..."
-if [ -z "$GITHUB_TOKEN" ]; then
-    echo "Warning: GITHUB_TOKEN not set. You may need to login manually."
-    echo "Run: echo \$GITHUB_TOKEN | docker login ghcr.io -u tomheno --password-stdin"
+# Login to Docker Hub
+echo "Logging in to Docker Hub..."
+if [ -z "$DOCKER_PASSWORD" ]; then
+    echo "Warning: DOCKER_PASSWORD not set. You may need to login manually."
+    echo "Run: docker login -u tomheno"
 else
-    echo "$GITHUB_TOKEN" | docker login ghcr.io -u tomheno --password-stdin
+    echo "$DOCKER_PASSWORD" | docker login -u tomheno --password-stdin
 fi
 
 # Build for linux/amd64 (GPU servers)
@@ -31,6 +31,9 @@ docker buildx build \
 echo ""
 echo "============================================"
 echo "✅ Image built and pushed: ${FULL_IMAGE}"
+echo ""
+echo "Get the SHA256 digest:"
+echo "docker inspect ${FULL_IMAGE} --format='{{index .RepoDigests 0}}'"
 echo ""
 echo "Next steps:"
 echo "1. Update dev-image.dstack.yml with the image: ${FULL_IMAGE}"

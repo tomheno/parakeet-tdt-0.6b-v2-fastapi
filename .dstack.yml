@@ -3,10 +3,10 @@ type: service
 # Service name
 name: parakeet-streaming-stt
 
-# Pre-built Docker image from registry
+# Pre-built Docker image from Docker Hub
 # YOU MUST build and push this image first!
-# Build: docker buildx build --platform linux/amd64 -f Dockerfile.gpu -t ghcr.io/tomheno/parakeet-streaming-stt:latest --push .
-image: ghcr.io/tomheno/parakeet-streaming-stt:latest
+# Build: docker buildx build --platform linux/amd64 -f Dockerfile.gpu -t tomheno/parakeet-streaming-stt:latest --push .
+image: tomheno/parakeet-streaming-stt:latest
 
 # Required: port the application listens on
 port: 8000

@@ -3,10 +3,9 @@ type: service
 # Service name
 name: parakeet-streaming-stt-registry
 
-# Use pre-built image from registry
-# Replace with your registry URL after building and pushing
-image: ghcr.io/tomheno/parakeet-streaming-stt:latest
-# Or Docker Hub: docker.io/yourusername/parakeet-streaming-stt:latest
+# Use pre-built image from Docker Hub
+# Build and push first: docker buildx build --platform linux/amd64 -f Dockerfile.gpu -t tomheno/parakeet-streaming-stt:latest --push .
+image: tomheno/parakeet-streaming-stt:latest
 
 # Required port field
 port: 8000

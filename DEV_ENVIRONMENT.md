@@ -143,7 +143,7 @@ git commit -m "Your changes"
 
 # 2. Build Docker image
 docker buildx build --platform linux/amd64 -f Dockerfile.gpu \
-  -t ghcr.io/tomheno/parakeet-streaming-stt:latest --push .
+  -t tomheno/parakeet-streaming-stt:latest --push .
 
 # 3. Deploy service
 dstack apply -f .dstack.yml
