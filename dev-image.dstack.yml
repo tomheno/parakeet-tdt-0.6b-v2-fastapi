@@ -4,13 +4,17 @@ name: parakeet-dev
 ide: vscode
 
 # Use pre-built Docker image with all dependencies from Docker Hub
-# Build and push first: ./build-dev-image.sh latest
+# Build and push first: docker buildx build --platform linux/amd64 -f Dockerfile.dev -t tomheno/parakeet-dev:latest --push .
 image: tomheno/parakeet-dev:latest
 
 # For private images, uncomment and add your Docker Hub credentials:
 # registry_auth:
 #   username: tomheno
 #   password: ${{ env.DOCKER_PASSWORD }}
+
+# Use only runpod backend
+backends: [runpod]
+regions: [eur-is-1]
 
 # Use fleet for cost optimization
 fleets:

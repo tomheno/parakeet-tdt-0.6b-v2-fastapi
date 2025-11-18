@@ -50,9 +50,9 @@ dstack apply -f dev.dstack.yml
 dstack fleet create -f fleet.dstack.yml
 ```
 
-This creates a managed pool of GPU instances with:
-- Auto-scaling (0-2 instances)
-- Cost optimization (runpod, vastai, lambda backends)
+This creates a single GPU instance with:
+- Fixed single instance (no auto-scaling)
+- Runpod backend only (eur-is-1 region)
 - 1 hour idle timeout
 
 ### 2. Build and Push Dev Image
@@ -69,13 +69,7 @@ echo $DOCKER_PASSWORD | docker login -u tomheno --password-stdin
 
 #### Build and push
 ```bash
-# Make script executable
-chmod +x build-dev-image.sh
-
-# Build and push
-./build-dev-image.sh latest
-
-# Or build manually
+# Build and push to Docker Hub
 docker buildx build \
   --platform linux/amd64 \
   -f Dockerfile.dev \
@@ -114,7 +108,7 @@ If you add new dependencies to `pyproject.toml`:
 
 ```bash
 # 1. Rebuild image
-./build-dev-image.sh latest
+docker buildx build --platform linux/amd64 -f Dockerfile.dev -t tomheno/parakeet-dev:latest --push .
 
 # 2. Restart dev environment
 dstack stop parakeet-dev
@@ -229,7 +223,7 @@ Or make image public on GitHub Container Registry.
 
 Rebuild image after updating `pyproject.toml`:
 ```bash
-./build-dev-image.sh latest
+docker buildx build --platform linux/amd64 -f Dockerfile.dev -t tomheno/parakeet-dev:latest --push .
 ```
 
 ### Fleet has no instances
@@ -259,7 +253,7 @@ dstack fleet create -f fleet.dstack.yml
 
 # 2. Build dev image (first time or after dependency changes)
 export GITHUB_TOKEN="ghp_your_token"
-./build-dev-image.sh latest
+docker buildx build --platform linux/amd64 -f Dockerfile.dev -t tomheno/parakeet-dev:latest --push .
 
 # 3. Launch dev environment
 dstack apply -f dev-image.dstack.yml

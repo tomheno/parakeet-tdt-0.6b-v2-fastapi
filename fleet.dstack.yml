@@ -1,16 +1,16 @@
 type: fleet
 name: parakeet-dev-fleet
 
-# Prefer cost-effective backends
-backends: [runpod, vastai, lambda]
+# Use only runpod backend
+backends: [runpod]
 
-# Prefer EU regions for lower latency
-regions: [eur-is-1, eu-se-1, eu-central-1]
+# Prefer EU region
+regions: [eur-is-1]
 
-# Allow provisioning of 0-2 instances
-nodes: 0..2
+# Fixed single instance (no auto-scaling)
+nodes: 1
 
-# Deprovision instances if idle for 1 hour
+# Deprovision instance if idle for 1 hour
 idle_duration: 1h
 
 resources:
