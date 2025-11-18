@@ -1,6 +1,6 @@
 # Development Dockerfile for dstack dev environments
-# Based on CUDA 12.9 with cuDNN for optimal Parakeet TDT performance
-FROM --platform=linux/amd64 nvidia/cuda:12.9.0-cudnn-devel-ubuntu24.04
+# Based on CUDA 12.1 with cuDNN 8 - stable and proven with NeMo/Parakeet TDT
+FROM --platform=linux/amd64 nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -8,8 +8,8 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3.12 \
-    python3.12-dev \
+    python3.10 \
+    python3.10-dev \
     python3-pip \
     build-essential \
     git \
@@ -22,8 +22,8 @@ RUN apt-get update && apt-get install -y \
     tmux \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.12 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+# Set Python 3.10 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 
 # Upgrade pip
 RUN python3 -m pip install --upgrade --ignore-installed pip setuptools wheel
