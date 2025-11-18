@@ -1,0 +1,32 @@
+# Development Dockerfile for dstack dev environments
+# Lighter and faster than production image
+FROM nvcr.io/nvidia/pytorch:24.01-py3
+
+WORKDIR /workspace
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    vim \
+    htop \
+    tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install UV
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
+
+# Copy project files
+COPY pyproject.toml .
+COPY README.md .
+
+# Pre-install dependencies (will be in image layers)
+# Note: Actual code will be mounted from local via repos
+RUN uv sync --all-extras
+
+# Expose port for server
+EXPOSE 8000
+
+# Default command (can be overridden)
+CMD ["bash"]

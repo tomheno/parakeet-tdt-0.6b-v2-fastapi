@@ -1,0 +1,22 @@
+type: fleet
+name: parakeet-dev-fleet
+
+# Prefer cost-effective backends
+backends: [runpod, vastai, lambda]
+
+# Prefer EU regions for lower latency
+regions: [eur-is-1, eu-se-1, eu-central-1]
+
+# Allow provisioning of 0-2 instances
+nodes: 0..2
+
+# Deprovision instances if idle for 1 hour
+idle_duration: 1h
+
+resources:
+  # 16GB GPU (enough for Parakeet TDT 0.6B fp16)
+  gpu:
+    memory: 16GB..24GB
+    count: 1
+  memory: 16GB..
+  disk: 50GB
