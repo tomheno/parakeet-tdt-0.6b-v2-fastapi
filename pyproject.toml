@@ -38,6 +38,8 @@ dependencies = [
     "websockets>=11.0.0",
     "soundfile>=0.12.1",
     "nemo_toolkit[asr]>=1.23.0",
+    "ml-dtypes>=0.5.0",  # Required for ONNX compatibility with NeMo
+    "cuda-python>=12.1.0,<12.2.0"
 ]
 
 [project.optional-dependencies]
