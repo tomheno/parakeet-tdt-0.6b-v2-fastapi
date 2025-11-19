@@ -29,20 +29,19 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 
 WORKDIR /workspace
 
-# Install UV and set PATH
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
+# Install UV by copying from official distroless image (recommended by UV docs)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy project files
 COPY pyproject.toml .
 COPY README.md .
 
-# Install dependencies with UV (use full path since ENV hasn't taken effect yet)
+# Install dependencies with UV using cache mount (improves build performance)
 # Note: Actual code will be mounted from local via repos
-RUN export PATH="/root/.cargo/bin:$PATH" && \
+RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --all-extras
 
-# Verify installation (ENV PATH is now active)
+# Verify installation
 RUN uv run python -c 'import torch; print("PyTorch:", torch.__version__, "CUDA:", torch.version.cuda, "Available:", torch.cuda.is_available())' && \
     uv run python -c 'import nemo; print("NeMo:", nemo.__version__)'
 
