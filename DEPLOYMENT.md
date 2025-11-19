@@ -15,7 +15,7 @@ docker buildx build --platform linux/amd64 -f Dockerfile.dev -t tomheno/parakeet
 dstack fleet create -f fleet.dstack.yml
 
 # 3. Launch dev environment
-dstack apply -f dev-image.dstack.yml
+dstack apply -f dev.dstack.yml
 
 # 4. Open VS Code (click the link from output)
 # Your code is mounted from local, changes are instant!
@@ -117,7 +117,7 @@ docker buildx build --platform linux/amd64 -f Dockerfile.dev -t tomheno/parakeet
 
 # 3. Restart dev environment
 dstack stop parakeet-dev
-dstack apply -f dev-image.dstack.yml
+dstack apply -f dev.dstack.yml
 ```
 
 ## Troubleshooting

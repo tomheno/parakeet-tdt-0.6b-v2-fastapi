@@ -37,11 +37,9 @@ class StreamingSession:
 
         if STREAMING_AVAILABLE:
             # Use NeMo's cache-aware streaming buffer
+            # Note: chunk_size, shift_size etc. are configured via model.encoder.streaming_cfg
             self.buffer = CacheAwareStreamingAudioBuffer(
                 model=model,
-                chunk_size=0.08,          # 80ms chunks
-                shift_size=0.04,          # 40ms overlap for smoothness
-                left_chunks=4,            # 320ms historical context
                 online_normalization=True
             )
             logger.info(f"Session {session_id}: Using CacheAwareStreamingAudioBuffer")
@@ -55,16 +53,37 @@ class StreamingSession:
         """Process audio chunk and return transcript (if any)."""
         if STREAMING_AVAILABLE and self.buffer:
             try:
-                result = self.buffer.infer_signal(audio_chunk)
-                if result and result.strip():
-                    self.last_transcript = result.strip()
-                    self.last_transcript_time = time.time()
-                    if not self.is_speaking:
-                        self.is_speaking = True
-                    return self.last_transcript
+                # Append audio to streaming buffer and process
+                self.buffer.append_audio(audio_chunk)
+
+                # Process chunks from buffer
+                transcripts = []
+                for audio_signal, audio_signal_len in self.buffer:
+                    # Transcribe using model's streaming inference
+                    with torch.inference_mode():
+                        logits = self.model.transcribe(
+                            audio=audio_signal,
+                            logprobs=False
+                        )
+                        if logits and len(logits) > 0:
+                            transcripts.append(logits[0])
+
+                # Reset buffer pointer for next chunk
+                if not self.buffer.is_buffer_empty():
+                    self.buffer.reset_buffer_pointer()
+
+                # Join transcripts if any
+                if transcripts:
+                    result = " ".join(transcripts).strip()
+                    if result:
+                        self.last_transcript = result
+                        self.last_transcript_time = time.time()
+                        if not self.is_speaking:
+                            self.is_speaking = True
+                        return self.last_transcript
                 return None
             except Exception as e:
-                logger.error(f"Streaming inference error: {e}")
+                logger.error(f"Streaming inference error: {e}", exc_info=True)
                 return None
         else:
             # Fallback: accumulate and transcribe every N chunks
@@ -113,7 +132,7 @@ class StreamingSession:
     def reset(self):
         """Reset session state."""
         if STREAMING_AVAILABLE and self.buffer:
-            self.buffer.reset()
+            self.buffer.reset_buffer()
         else:
             self.audio_buffer = []
 

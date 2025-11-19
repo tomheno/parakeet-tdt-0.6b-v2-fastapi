@@ -1,0 +1,52 @@
+type: dev-environment
+name: parakeet-dev
+
+ide: vscode
+
+# Use pre-built Docker image with all dependencies from Docker Hub
+# Build and push first: docker buildx build --platform linux/amd64 -f Dockerfile.dev -t tomheno/parakeet-dev:latest --push .
+image: "tomheno/fast-tts:latest"
+
+# Use only runpod backend
+backends: [runpod]
+# regions: [eur-is-1]
+
+# Environment variables
+env:
+  - MODEL_PRECISION=fp16
+  - DEVICE=cuda
+  - LOG_LEVEL=INFO
+
+# GPU resources
+resources:
+  gpu:
+    count: 1
+    name:
+    - "RTX4090"
+    - "RTX5090"
+
+
+# Cost limit
+max_price: 2.00
+# Spot instances for cost savings
+# spot_policy: auto
+
+# Auto-retry on interruption
+retry:
+  on_events: [no-capacity, interruption, error]
+  duration: 30m
+
+# Auto-stop if GPU utilization stays below 5% for 1 hour
+utilization_policy:
+  min_gpu_utilization: 2
+  time_window: 1h
+
+# Auto-stop after 2 hours of inactivity
+inactivity_duration: 20m
+
+# Working directory
+working_dir: /workspace
+
+# Mount local repository to /workspace
+repos:
+  - .:/workspace/repo
