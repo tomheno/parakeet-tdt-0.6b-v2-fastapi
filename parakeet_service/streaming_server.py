@@ -51,7 +51,7 @@ class StreamingSession:
 
     def process_audio(self, audio_chunk: np.ndarray) -> Optional[str]:
         """Process audio chunk and return transcript (if any)."""
-        if STREAMING_AVAILABLE and self.buffer:
+        if STREAMING_AVAILABLE and self.buffer is not None:
             try:
                 # Append audio to streaming buffer and process
                 self.buffer.append_audio(audio_chunk)
@@ -131,7 +131,7 @@ class StreamingSession:
 
     def reset(self):
         """Reset session state."""
-        if STREAMING_AVAILABLE and self.buffer:
+        if STREAMING_AVAILABLE and self.buffer is not None:
             self.buffer.reset_buffer()
         else:
             self.audio_buffer = []

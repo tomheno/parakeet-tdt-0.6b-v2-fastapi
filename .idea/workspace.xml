@@ -5,14 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="10f89576-9b69-4f82-b767-63e78e10c34a" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/dev.dstack.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.dstack.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/DEPLOYMENT.md" beforeDir="false" afterPath="$PROJECT_DIR$/DEPLOYMENT.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Dockerfile.dev" beforeDir="false" afterPath="$PROJECT_DIR$/Dockerfile.dev" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dev-image.dstack.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/fleet.dstack.yml" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/parakeet_service/streaming_server.py" beforeDir="false" afterPath="$PROJECT_DIR$/parakeet_service/streaming_server.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pyproject.toml" beforeDir="false" afterPath="$PROJECT_DIR$/pyproject.toml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -68,7 +61,7 @@
       <updated>1763063848973</updated>
       <workItem from="1763063850417" duration="5270000" />
       <workItem from="1763157510005" duration="4072000" />
-      <workItem from="1763501453764" duration="35166000" />
+      <workItem from="1763501453764" duration="35477000" />
     </task>
     <servers />
   </component>
