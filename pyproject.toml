@@ -196,3 +196,7 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu121" }
 torchaudio = { index = "pytorch-cu121" }
+
+# Hatchling build configuration
+[tool.hatch.build.targets.wheel]
+packages = ["parakeet_service"]
