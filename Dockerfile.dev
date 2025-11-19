@@ -31,6 +31,8 @@ WORKDIR /workspace
 
 # Install UV (fast Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Set PATH for UV
 ENV PATH="/root/.cargo/bin:$PATH"
 
 # Copy project files
@@ -39,11 +41,11 @@ COPY README.md .
 
 # Pre-install dependencies with UV
 # Note: Actual code will be mounted from local via repos
-RUN uv sync --all-extras
+RUN /root/.cargo/bin/uv sync --all-extras
 
 # Verify installation
-RUN uv run python -c 'import torch; print("PyTorch:", torch.__version__, "CUDA:", torch.version.cuda, "Available:", torch.cuda.is_available())' && \
-    uv run python -c 'import nemo; print("NeMo:", nemo.__version__)'
+RUN /root/.cargo/bin/uv run python -c 'import torch; print("PyTorch:", torch.__version__, "CUDA:", torch.version.cuda, "Available:", torch.cuda.is_available())' && \
+    /root/.cargo/bin/uv run python -c 'import nemo; print("NeMo:", nemo.__version__)'
 
 # Expose port for server
 EXPOSE 8000
