@@ -1,20 +1,18 @@
 # Development Dockerfile for dstack dev environments
 # Based on CUDA 12.1 with cuDNN 8 - stable and proven with NeMo/Parakeet TDT
-FROM --platform=linux/amd64 nvidia/cuda:12.1.0-cudnn8-devel-ubuntu20.04
+# Using devel variant for development tools
+FROM --platform=linux/amd64 nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
-# Install Python 3.10 from deadsnakes PPA (Ubuntu 20.04 default is 3.8)
+# Install Python 3.10 and development tools (Python 3.10 is default on Ubuntu 22.04)
 RUN apt-get update && apt-get install -y \
-    software-properties-common \
-    && add-apt-repository ppa:deadsnakes/ppa -y \
-    && apt-get update \
-    && apt-get install -y \
     python3.10 \
     python3.10-dev \
     python3.10-venv \
+    python3-pip \
     build-essential \
     git \
     curl \
@@ -28,9 +26,6 @@ RUN apt-get update && apt-get install -y \
 # Set Python 3.10 as default
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
-
-# Install pip for Python 3.10
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10
 
 WORKDIR /workspace
 
