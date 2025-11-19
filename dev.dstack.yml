@@ -50,3 +50,6 @@ working_dir: /workspace
 # Mount local repository to /workspace
 repos:
   - .:/workspace/repo
+
+init:
+  - ./install_ffmpeg.sh

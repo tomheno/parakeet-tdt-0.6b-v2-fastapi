@@ -38,11 +38,13 @@ class StreamingSession:
         if STREAMING_AVAILABLE:
             # Use NeMo's cache-aware streaming buffer
             # Note: chunk_size, shift_size etc. are configured via model.encoder.streaming_cfg
+            # online_normalization=False because model's preprocessor already normalizes
+            # (and NeMo has a device mismatch bug when online_normalization=True)
             self.buffer = CacheAwareStreamingAudioBuffer(
                 model=model,
-                online_normalization=True
+                online_normalization=False
             )
-            logger.info(f"Session {session_id}: Using CacheAwareStreamingAudioBuffer")
+            logger.info(f"Session {session_id}: Using CacheAwareStreamingAudioBuffer (offline normalization)")
         else:
             # Fallback: simple chunked inference
             self.buffer = None
