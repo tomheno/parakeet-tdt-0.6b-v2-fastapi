@@ -29,23 +29,20 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 
 WORKDIR /workspace
 
-# Install UV (fast Python package manager)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ls -la /root/.cargo/bin/ || echo "Cargo bin not found" && \
-    find /root -name "uv" 2>/dev/null || echo "UV not found in /root"
-
-# Set PATH for UV
-ENV PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
+# Install UV and set PATH
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
 
 # Copy project files
 COPY pyproject.toml .
 COPY README.md .
 
-# Pre-install dependencies with UV
+# Install dependencies with UV (use full path since ENV hasn't taken effect yet)
 # Note: Actual code will be mounted from local via repos
-RUN which uv && uv sync --all-extras
+RUN export PATH="/root/.cargo/bin:$PATH" && \
+    uv sync --all-extras
 
-# Verify installation
+# Verify installation (ENV PATH is now active)
 RUN uv run python -c 'import torch; print("PyTorch:", torch.__version__, "CUDA:", torch.version.cuda, "Available:", torch.cuda.is_available())' && \
     uv run python -c 'import nemo; print("NeMo:", nemo.__version__)'
 
