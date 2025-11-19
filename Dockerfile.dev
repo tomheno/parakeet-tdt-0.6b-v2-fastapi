@@ -37,12 +37,12 @@ COPY pyproject.toml .
 COPY README.md .
 
 # Install dependencies with UV using cache mount (improves build performance)
-# Note: Actual code will be mounted from local via repos
+# Use --no-install-project since code will be mounted from local via repos
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --all-extras
+    uv sync --no-install-project --all-extras
 
-# Verify installation
-RUN uv run python -c 'import torch; print("PyTorch:", torch.__version__, "CUDA:", torch.version.cuda, "Available:", torch.cuda.is_available())' && \
+# Verify dependencies are installed (not the project itself)
+RUN uv run python -c 'import torch; print("PyTorch:", torch.__version__, "CUDA:", torch.version.cuda)' && \
     uv run python -c 'import nemo; print("NeMo:", nemo.__version__)'
 
 # Expose port for server
