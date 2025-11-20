@@ -5,6 +5,7 @@ from .model import lifespan
 from .config import logger
 
 from parakeet_service.streaming_server import websocket_streaming_endpoint
+from parakeet_service.streaming_server_vad import websocket_streaming_endpoint_vad
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -36,7 +37,23 @@ def create_app() -> FastAPI:
         model = app.state.asr_model
         await websocket_streaming_endpoint(websocket, model)
 
-    logger.info("FastAPI app initialised with streaming endpoint for LiveKit")
+    # VAD-enhanced streaming endpoint (improved utterance detection)
+    @app.websocket("/stream/vad")
+    async def stream_vad_endpoint(websocket: WebSocket):
+        """
+        Low-latency streaming STT with Silero VAD for accurate utterance detection.
+
+        Uses VAD to detect speech boundaries (no simple timeout).
+        Lower latency than batching, more accurate than timeout-based detection.
+
+        Protocol:
+        - Client sends: PCM int16 audio bytes (16kHz mono)
+        - Server sends: JSON {"text": "...", "is_final": true/false}
+        """
+        model = app.state.asr_model
+        await websocket_streaming_endpoint_vad(websocket, model)
+
+    logger.info("FastAPI app initialised with streaming endpoints (/stream, /stream/vad)")
     return app
 
 

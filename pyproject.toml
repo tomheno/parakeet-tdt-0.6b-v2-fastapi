@@ -39,7 +39,9 @@ dependencies = [
     "soundfile>=0.12.1",
     "nemo_toolkit[asr]>=1.23.0",
     "ml-dtypes>=0.5.0",  # Required for ONNX compatibility with NeMo
-    "cuda-python>=12.1.0,<12.2.0"
+    "cuda-python>=12.1.0,<12.2.0",
+    # VAD for accurate utterance detection (loaded via torch.hub)
+    # No explicit package needed - torch.hub downloads on first use
 ]
 
 [project.optional-dependencies]

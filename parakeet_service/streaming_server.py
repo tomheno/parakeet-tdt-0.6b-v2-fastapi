@@ -16,57 +16,7 @@ logger = logging.getLogger(__name__)
 # NeMo streaming imports
 try:
     from nemo.collections.asr.parts.utils.streaming_utils import CacheAwareStreamingAudioBuffer
-    from nemo.collections.asr.parts.preprocessing.features import normalize_batch
     STREAMING_AVAILABLE = True
-
-    # Monkey-patch to fix NeMo device mismatch bug in CacheAwareStreamingAudioBuffer
-    # Bug: torch.tensor([processed_signal_length]) creates CPU tensor, but processed_signal is on CUDA
-    # Fix: Explicitly specify device when creating tensors
-    _original_append_processed_signal = CacheAwareStreamingAudioBuffer.append_processed_signal
-
-    def _fixed_append_processed_signal(self, processed_signal, stream_id=-1):
-        """Fixed version that creates tensors on the correct device"""
-        device = processed_signal.device
-        processed_signal_length = torch.tensor(processed_signal.size(-1), device=device)
-
-        if stream_id >= 0 and (self.streams_length is not None and stream_id >= len(self.streams_length)):
-            raise ValueError("Not valid stream_id!")
-
-        if self.buffer is None:
-            if stream_id >= 0:
-                raise ValueError("stream_id can not be specified when there is no stream.")
-            self.buffer = processed_signal
-            self.streams_length = torch.tensor([processed_signal_length], device=device)
-        else:
-            if self.buffer.size(1) != processed_signal.size(1):
-                raise ValueError("Buffer and the processed signal have different dimensions!")
-            if stream_id < 0:
-                self.buffer = torch.nn.functional.pad(self.buffer, pad=(0, 0, 0, 0, 0, 1))
-                self.streams_length = torch.cat(
-                    (self.streams_length, torch.tensor([0], device=self.streams_length.device)), dim=-1
-                )
-                stream_id = len(self.streams_length) - 1
-            needed_len = self.streams_length[stream_id] + processed_signal_length
-            if needed_len > self.buffer.size(-1):
-                self.buffer = torch.nn.functional.pad(self.buffer, pad=(0, needed_len - self.buffer.size(-1)))
-
-            self.buffer[
-                stream_id, :, self.streams_length[stream_id] : self.streams_length[stream_id] + processed_signal_length
-            ] = processed_signal
-            self.streams_length[stream_id] = self.streams_length[stream_id] + processed_signal.size(-1)
-
-        if self.online_normalization:
-            # FIX: Create seq_len tensor on correct device
-            processed_signal, x_mean, x_std = normalize_batch(
-                x=processed_signal,
-                seq_len=torch.tensor([processed_signal_length], device=device),
-                normalize_type=self.model_normalize_type,
-            )
-        return processed_signal, processed_signal_length, stream_id
-
-    CacheAwareStreamingAudioBuffer.append_processed_signal = _fixed_append_processed_signal
-    logger.info("Applied NeMo device-fix patch to CacheAwareStreamingAudioBuffer.append_processed_signal")
-
 except ImportError:
     logger.warning("NeMo streaming utils not available, falling back to chunk-based inference")
     STREAMING_AVAILABLE = False
@@ -88,12 +38,12 @@ class StreamingSession:
         if STREAMING_AVAILABLE:
             # Use NeMo's cache-aware streaming buffer
             # Note: chunk_size, shift_size etc. are configured via model.encoder.streaming_cfg
-            # online_normalization=True for per-chunk adaptive normalization (bug fixed with monkey patch)
+            # online_normalization=False: preprocessor handles normalization
             self.buffer = CacheAwareStreamingAudioBuffer(
                 model=model,
-                online_normalization=True
+                online_normalization=False
             )
-            logger.info(f"Session {session_id}: Using CacheAwareStreamingAudioBuffer with online normalization")
+            logger.info(f"Session {session_id}: Using CacheAwareStreamingAudioBuffer")
         else:
             # Fallback: simple chunked inference
             self.buffer = None
@@ -110,14 +60,24 @@ class StreamingSession:
                 # Process chunks from buffer
                 transcripts = []
                 for audio_signal, audio_signal_len in self.buffer:
-                    # Transcribe using model's streaming inference
+                    # audio_signal is preprocessed mel-spectrogram features, not raw audio
+                    # Use encoder + decoder for streaming inference
                     with torch.inference_mode():
-                        logits = self.model.transcribe(
-                            audio=audio_signal,
-                            logprobs=False
+                        # Encode features
+                        encoded, encoded_len = self.model(
+                            processed_signal=audio_signal,
+                            processed_signal_length=audio_signal_len
                         )
-                        if logits and len(logits) > 0:
-                            transcripts.append(logits[0])
+
+                        # Decode with greedy decoding
+                        best_hyp, _ = self.model.decoding.rnnt_decoder_predictions_tensor(
+                            encoder_output=encoded,
+                            encoded_lengths=encoded_len,
+                            return_hypotheses=False
+                        )
+
+                        if best_hyp and len(best_hyp) > 0:
+                            transcripts.append(best_hyp[0])
 
                 # Reset buffer pointer for next chunk
                 if not self.buffer.is_buffer_empty():

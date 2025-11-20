@@ -52,4 +52,4 @@ repos:
   - .:/workspace/repo
 
 init:
-  - ./install_ffmpeg.sh
+  - /workspace/repo/install_ffmpeg.sh
