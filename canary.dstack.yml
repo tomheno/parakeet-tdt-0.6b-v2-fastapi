@@ -1,0 +1,25 @@
+type: service
+name: canary-streaming-stt
+image: tomheno/canary-streaming-stt:latest
+port: 8000
+
+env:
+  - MODEL_PRECISION=fp16
+  - DEVICE=cuda
+  - LOG_LEVEL=INFO
+  - TRANSCRIBE_INTERVAL_S=1.0
+  - SILENCE_TIMEOUT_S=1.5
+
+resources:
+  gpu:
+    memory: 16GB
+    count: 1
+  memory: 16GB
+  disk: 50GB
+
+replicas: 1..10
+scaling:
+  metric: rps
+  target: 10
+
+spot_policy: on-demand
