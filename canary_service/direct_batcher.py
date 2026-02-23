@@ -25,6 +25,7 @@ Optimizations:
 
 import asyncio
 import io
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -36,6 +37,7 @@ import soundfile as sf
 import torch
 
 from .config import TARGET_SR, logger
+from .optimizations import _env_bool
 
 # Lazy imports — only needed when timestamps=True
 _ts_funcs = {}
@@ -51,18 +53,19 @@ def _get_timestamp_funcs():
     return _ts_funcs
 
 # ---------------------------------------------------------------------------
-# torch.compile config
+# Encoder acceleration config
 # ---------------------------------------------------------------------------
 
-# Compilation strategy:
-#   "reduce-overhead" — CUDA graphs, fastest steady-state but needs per-shape warmup
-#   "max-autotune"    — picks best kernel (Triton vs CUDA graphs) per op
-#   "default"         — balanced compile, works well with dynamic=True
+# CUDA_GRAPH_ENCODER=1 — manual CUDA graph capture for encoder (default ON)
+#   Fast to capture (seconds), replays captured graphs for matching shapes.
+#   Captures graphs for batch sizes: 1,2,4,8,16,32,64,128,256.
+#   Falls back to eager for uncaptured shapes.
 #
-# dynamic=True uses symbolic shapes so ONE compilation covers all batch sizes.
-COMPILE_ENCODER = True
-COMPILE_MODE = "reduce-overhead"
-COMPILE_DYNAMIC = False  # NeMo conformer has ops incompatible with symbolic shapes
+# COMPILE_ENCODER=0 — torch.compile alternative (default OFF, slow compile)
+CUDA_GRAPH_ENCODER = _env_bool("CUDA_GRAPH_ENCODER", default=False)
+COMPILE_ENCODER = _env_bool("COMPILE_ENCODER", default=False)
+COMPILE_MODE = os.getenv("COMPILE_MODE", "default")
+COMPILE_DYNAMIC = _env_bool("COMPILE_DYNAMIC", default=True)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -173,8 +176,14 @@ class DirectInferenceBatcher:
             dtype=torch.float32, pin_memory=True,
         )
 
-        # torch.compile the encoder only (preprocessor is ~1ms, not worth compiling)
-        if COMPILE_ENCODER:
+        # Encoder acceleration: CUDA graphs (fast) or torch.compile (slow)
+        self._compiled_encoder = model.encoder
+        # {(batch_size, audio_len): (graph, static_audio, static_lengths, static_encoded, static_encoded_len)}
+        self._encoder_graphs = {}
+        # Sorted list of captured audio lengths for quick lookup
+        self._graph_audio_lens = []
+
+        if COMPILE_ENCODER and not CUDA_GRAPH_ENCODER:
             try:
                 self._compiled_encoder = torch.compile(
                     model.encoder,
@@ -189,8 +198,6 @@ class DirectInferenceBatcher:
             except Exception as e:
                 logger.warning("torch.compile failed, using eager: %s", e)
                 self._compiled_encoder = model.encoder
-        else:
-            self._compiled_encoder = model.encoder
 
     # ------------------------------------------------------------------
     # Prompt token caching
@@ -213,74 +220,169 @@ class DirectInferenceBatcher:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def warmup(self):
-        """Two-phase warmup for torch.compile + CUDA graphs.
+    # ------------------------------------------------------------------
+    # CUDA graph encoder
+    # ------------------------------------------------------------------
 
-        Phase 1: Run on main thread to trigger Dynamo trace + Inductor
-                 compilation.  Populates the compiler cache.
-        Phase 2: Re-run on _gpu_executor thread.  Dynamo/Inductor results
-                 are cached so this is fast — it only captures CUDA graphs
-                 on the correct thread.
+    def _capture_encoder_graph(self, batch_size: int, max_audio_len: int):
+        """Capture a CUDA graph of preprocessor + encoder for a fixed shape.
 
-        This avoids the ~60s-per-size penalty of cold-compiling on the GPU
-        thread (which previously took 20+ minutes for 22 sizes).
+        Returns (graph, static_processed, static_processed_len,
+                 static_encoded, static_encoded_len).
         """
-        if not COMPILE_ENCODER:
-            return
-
-        dummy_len = int(TARGET_SR * 3.5)
-        dummy_audio = [np.zeros(dummy_len, dtype=np.float32)]
-
-        # Build warmup sizes: powers-of-2 + neighbors
-        warmup_sizes = set()
-        bs = 1
-        while bs <= self.max_batch_size:
-            warmup_sizes.add(bs)
-            if bs > 1:
-                warmup_sizes.add(bs - 1)
-            if bs + 1 <= self.max_batch_size:
-                warmup_sizes.add(bs + 1)
-            bs *= 2
-        warmup_sizes.add(self.max_batch_size)
-        warmup_sizes = sorted(warmup_sizes)
-
-        # Phase 1: compile on main thread (populates Dynamo/Inductor cache)
-        logger.info(
-            "Phase 1: Compiling encoder for %d batch sizes (mode=%s) ...",
-            len(warmup_sizes), COMPILE_MODE,
+        # Static input buffers (fixed shape, reused across replays)
+        static_audio = torch.zeros(
+            batch_size, max_audio_len, dtype=torch.float32, device=self._device
         )
-        t0 = time.time()
-        for bs in warmup_sizes:
-            batch = dummy_audio * bs
-            try:
-                self._gpu_inference_sync(batch, "en", "en", False)
-            except Exception as e:
-                logger.warning("Phase 1 warmup failed bs=%d: %s", bs, e)
-            if bs <= 2 or bs in (32, 64, 128, 256):
-                logger.info("  phase1 bs=%d  (%.1fs)", bs, time.time() - t0)
-        logger.info("Phase 1 done in %.1fs", time.time() - t0)
+        static_lengths = torch.full(
+            (batch_size,), max_audio_len, dtype=torch.long, device=self._device
+        )
 
-        # Phase 2: re-run on GPU executor thread (captures CUDA graphs)
-        def _capture_graphs():
-            logger.info("Phase 2: Capturing CUDA graphs on GPU thread ...")
-            t1 = time.time()
-            for bs in warmup_sizes:
-                batch = dummy_audio * bs
-                try:
-                    self._gpu_inference_sync(batch, "en", "en", False)
-                except Exception as e:
-                    logger.warning("Phase 2 failed bs=%d: %s", bs, e)
-            logger.info(
-                "Phase 2 done: %d CUDA graphs in %.1fs",
-                len(warmup_sizes), time.time() - t1,
+        # Warmup runs (mandatory before capture to stabilize cuDNN etc.)
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s), torch.inference_mode():
+            for _ in range(3):
+                processed, processed_len = self.model.preprocessor(
+                    input_signal=static_audio, length=static_lengths
+                )
+                encoded, encoded_len = self.model.encoder(
+                    audio_signal=processed, length=processed_len
+                )
+        torch.cuda.current_stream().wait_stream(s)
+
+        # Capture
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph), torch.inference_mode():
+            static_processed, static_processed_len = self.model.preprocessor(
+                input_signal=static_audio, length=static_lengths
+            )
+            static_encoded, static_encoded_len = self.model.encoder(
+                audio_signal=static_processed, length=static_processed_len
             )
 
-        future = _gpu_executor.submit(_capture_graphs)
+        return (graph, static_audio, static_lengths,
+                static_encoded, static_encoded_len)
+
+    def _run_encoder_graph(self, audio_tensor, length_tensor):
+        """Run encoder using CUDA graph if available, else eager.
+
+        Finds the smallest captured graph whose audio length >= actual max_len,
+        at the matching batch size. This minimizes wasted padding compute.
+        """
+        bs = audio_tensor.shape[0]
+        max_len = audio_tensor.shape[1]
+
+        # Find smallest captured audio length >= max_len for this batch size
+        for graph_len in self._graph_audio_lens:
+            if graph_len >= max_len:
+                entry = self._encoder_graphs.get((bs, graph_len))
+                if entry is not None:
+                    graph, static_audio, static_lengths, static_encoded, static_encoded_len = entry
+                    # Copy audio into static buffer
+                    static_audio[:bs, :max_len].copy_(audio_tensor, non_blocking=True)
+                    if max_len < graph_len:
+                        static_audio[:bs, max_len:graph_len].zero_()
+                    static_lengths.copy_(length_tensor, non_blocking=True)
+                    graph.replay()
+                    return static_encoded.clone(), static_encoded_len.clone()
+
+        # Eager fallback (audio too long or batch size not captured)
+        with torch.inference_mode():
+            processed, processed_len = self.model.preprocessor(
+                input_signal=audio_tensor, length=length_tensor
+            )
+            encoded, encoded_len = self._compiled_encoder(
+                audio_signal=processed, length=processed_len
+            )
+        return encoded, encoded_len
+
+    def warmup(self):
+        """Warmup: CUDA graph capture or torch.compile warmup on GPU thread.
+
+        For CUDA graphs: captures graphs for power-of-2 batch sizes at a
+        representative audio length (~5s). Fast — takes ~30s total.
+        """
+        if not CUDA_GRAPH_ENCODER and not COMPILE_ENCODER:
+            return
+
+        def _warmup_on_gpu():
+            t0 = time.time()
+
+            if CUDA_GRAPH_ENCODER:
+                # Capture CUDA graphs for common (batch_size, audio_length) combos.
+                # Multiple audio lengths to minimize padding waste:
+                #   2s  — short utterances
+                #   5s  — typical speech
+                #   10s — longer utterances
+                #   20s — long audio
+                audio_lens = [TARGET_SR * d for d in (2, 5, 10, 20)]
+
+                # Power-of-2 batch sizes up to max
+                capture_sizes = [1, 2, 4, 8, 16, 32, 64, 128]
+                if self.max_batch_size not in capture_sizes and self.max_batch_size <= 256:
+                    capture_sizes.append(self.max_batch_size)
+                capture_sizes = sorted(s for s in capture_sizes if s <= self.max_batch_size)
+
+                total = len(capture_sizes) * len(audio_lens)
+                logger.info(
+                    "CUDA graph encoder warmup: %d batch sizes × %d audio lengths = %d graphs ...",
+                    len(capture_sizes), len(audio_lens), total,
+                )
+                captured = 0
+                for audio_len in audio_lens:
+                    for bs in capture_sizes:
+                        try:
+                            entry = self._capture_encoder_graph(bs, audio_len)
+                            self._encoder_graphs[(bs, audio_len)] = entry
+                            captured += 1
+                        except Exception as e:
+                            logger.warning("  bs=%d len=%d capture failed: %s", bs, audio_len, e)
+                    logger.info(
+                        "  audio=%ds: %d/%d batch sizes captured (%.1fs)",
+                        audio_len // TARGET_SR, len(capture_sizes),
+                        len(capture_sizes), time.time() - t0,
+                    )
+
+                # Store sorted audio lengths for quick lookup
+                self._graph_audio_lens = sorted(set(
+                    k[1] for k in self._encoder_graphs.keys()
+                ))
+
+                # Verify replay
+                logger.info("Verifying graph replay ...")
+                dummy = np.zeros(int(TARGET_SR * 3.0), dtype=np.float32)
+                try:
+                    self._gpu_inference_sync([dummy], "en", "en", False)
+                    logger.info("  Verify OK")
+                except Exception as e:
+                    logger.warning("  Verify failed: %s — disabling CUDA graph encoder", e)
+                    self._encoder_graphs.clear()
+                    self._graph_audio_lens.clear()
+
+                logger.info(
+                    "CUDA graph encoder ready: %d/%d graphs in %.1fs (audio lens: %s)",
+                    captured, total, time.time() - t0,
+                    [l // TARGET_SR for l in self._graph_audio_lens],
+                )
+
+            elif COMPILE_ENCODER:
+                # torch.compile warmup (slow but comprehensive)
+                warmup_durations = [d / 2.0 for d in range(2, 21)]
+                dummy_audios = {
+                    dur: [np.zeros(int(TARGET_SR * dur), dtype=np.float32)]
+                    for dur in warmup_durations
+                }
+                logger.info("torch.compile warmup: %d audio lengths ...", len(warmup_durations))
+                for dur in warmup_durations:
+                    try:
+                        self._gpu_inference_sync(dummy_audios[dur], "en", "en", False)
+                    except Exception as e:
+                        logger.warning("Warmup dur=%.1fs failed: %s", dur, e)
+                logger.info("torch.compile warmup done (%.1fs)", time.time() - t0)
+
+        future = _gpu_executor.submit(_warmup_on_gpu)
         future.result()
-        logger.info(
-            "Warmup complete: %d sizes, total %.1fs",
-            len(warmup_sizes), time.time() - t0,
-        )
 
     def start(self, loop: asyncio.AbstractEventLoop = None):
         self._loop = loop or asyncio.get_running_loop()
@@ -444,12 +546,19 @@ class DirectInferenceBatcher:
             )
 
         with torch.inference_mode():
-            processed, processed_len = self.model.preprocessor(
-                input_signal=audio_tensor, length=length_tensor
-            )
-            encoded, encoded_len = self._compiled_encoder(
-                audio_signal=processed, length=processed_len
-            )
+            if self._encoder_graphs:
+                # CUDA graph path: preprocessor + encoder fused in graph
+                encoded, encoded_len = self._run_encoder_graph(
+                    audio_tensor, length_tensor
+                )
+            else:
+                # Eager / torch.compile path
+                processed, processed_len = self.model.preprocessor(
+                    input_signal=audio_tensor, length=length_tensor
+                )
+                encoded, encoded_len = self._compiled_encoder(
+                    audio_signal=processed, length=processed_len
+                )
             enc_states = self.model.encoder_decoder_proj(encoded.permute(0, 2, 1))
             enc_mask = self._lens_to_mask(
                 encoded_len, enc_states.shape[1]
@@ -466,6 +575,10 @@ class DirectInferenceBatcher:
             prompt_ids = self._get_prompt_tokens(source_lang, target_lang, use_decoder_ts)
             # .expand() is zero-copy (no memory allocation), unlike .repeat()
             decoder_input_ids = prompt_ids.unsqueeze(0).expand(batch_size, -1)
+
+            # Invalidate cross-attention K/V cache before new decode
+            from .optimizations import clear_kv_cache
+            clear_kv_cache()
 
             hypotheses = self.model.decoding.decode_predictions_tensor(
                 encoder_hidden_states=enc_states,

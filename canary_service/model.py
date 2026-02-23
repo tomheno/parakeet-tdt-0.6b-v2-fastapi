@@ -62,6 +62,24 @@ async def lifespan(app):
     model.eval()
     logger.info("Loaded model with %s weights on %s", MODEL_PRECISION.upper(), DEVICE)
 
+    # Remove CTC timestamps model if not needed (saves ~200MB VRAM)
+    import os
+    if os.getenv("NO_TIMESTAMPS", "0").lower() in ("1", "true", "yes"):
+        if hasattr(model, 'timestamps_asr_model') and model.timestamps_asr_model is not None:
+            del model.timestamps_asr_model
+            model.timestamps_asr_model = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.info("Removed CTC timestamps model (NO_TIMESTAMPS=1)")
+
+    # Apply decoder optimizations in two phases:
+    # Phase 1 (pre-warmup): greedy + SDPA + KV cache — safe with CUDA graphs
+    # Phase 2 (post-warmup): torch.compile decoder — conflicts with graph capture
+    from .optimizations import apply_pre_warmup_optimizations, apply_post_warmup_optimizations
+
+    apply_pre_warmup_optimizations(model)
+
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -74,6 +92,10 @@ async def lifespan(app):
 
     batcher = DirectInferenceBatcher(model)
     batcher.warmup()  # pre-compile CUDA graphs for all batch sizes
+
+    # Now safe to compile the decoder (after encoder CUDA graphs are captured)
+    apply_post_warmup_optimizations(model)
+
     batcher.start()
     app.state.batcher = batcher
     logger.info(
