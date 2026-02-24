@@ -126,6 +126,7 @@ class TranscribeRequest:
     source_lang: str
     target_lang: str
     timestamps: bool = False
+    beam_size: int = 0          # 0 = greedy (default), >1 = beam search
     future: asyncio.Future = field(default_factory=lambda: None)
 
 
@@ -450,11 +451,14 @@ class DirectInferenceBatcher:
         source_lang: str,
         target_lang: str,
         timestamps: bool = False,
+        beam_size: int = 0,
     ):
         """Submit audio and wait for transcription result.
 
         Audio decoding happens on a CPU thread pool (parallel with GPU).
         The decoded numpy array is then queued for GPU inference.
+
+        beam_size: 0 = greedy (default, fastest), >1 = beam search
         """
         # Decode audio on CPU thread pool — doesn't block event loop or GPU
         audio_np = await self._loop.run_in_executor(
@@ -467,6 +471,7 @@ class DirectInferenceBatcher:
             source_lang=source_lang,
             target_lang=target_lang,
             timestamps=timestamps,
+            beam_size=beam_size,
             future=future,
         )
         await self._queue.put(req)
@@ -519,15 +524,15 @@ class DirectInferenceBatcher:
 
                 groups: dict[tuple, list[TranscribeRequest]] = {}
                 for req in batch:
-                    key = (req.source_lang, req.target_lang, req.timestamps)
+                    key = (req.source_lang, req.target_lang, req.timestamps, req.beam_size)
                     groups.setdefault(key, []).append(req)
 
-                for (src, tgt, ts), reqs in groups.items():
+                for (src, tgt, ts, beam), reqs in groups.items():
                     try:
                         gpu_future = self._loop.run_in_executor(
                             _gpu_executor,
                             self._gpu_inference_sync,
-                            [r.audio for r in reqs], src, tgt, ts,
+                            [r.audio for r in reqs], src, tgt, ts, beam,
                         )
 
                         if pending_resolve:
@@ -637,13 +642,18 @@ class DirectInferenceBatcher:
             )
         return audio_tensor, length_tensor, batch_size, lengths
 
-    def _gpu_inference_sync(self, audio_arrays, source_lang, target_lang, timestamps):
+    def _gpu_inference_sync(self, audio_arrays, source_lang, target_lang, timestamps, beam_size=0):
         """Prep + encode + decode on default CUDA stream."""
         import gc as _gc
         _gc_was_enabled = _gc.isenabled()
         _gc.disable()
 
         t_start = time.monotonic()
+
+        # Switch decoding strategy if dynamic switching is available
+        from .optimizations import _decoding_switch
+        if _decoding_switch is not None:
+            _decoding_switch(beam_size)
 
         audio_tensor, length_tensor, batch_size, lengths = \
             self._prep_and_transfer(audio_arrays)
@@ -657,13 +667,20 @@ class DirectInferenceBatcher:
                 encoded, encoded_len = self._run_encoder_graph(
                     audio_tensor, length_tensor
                 )
+                torch.cuda.synchronize()
+                t_preproc = t_prep
+                t_enc = time.monotonic()
             else:
                 processed, processed_len = self.model.preprocessor(
                     input_signal=audio_tensor, length=length_tensor
                 )
+                torch.cuda.synchronize()
+                t_preproc = time.monotonic()
                 encoded, encoded_len = self._compiled_encoder(
                     audio_signal=processed, length=processed_len
                 )
+                torch.cuda.synchronize()
+                t_enc = time.monotonic()
 
             enc_states = self.model.encoder_decoder_proj(encoded.permute(0, 2, 1))
             enc_mask = self._lens_to_mask(
@@ -686,6 +703,13 @@ class DirectInferenceBatcher:
                 decoder_input_ids=decoder_input_ids,
                 return_hypotheses=timestamps,
             )
+            torch.cuda.synchronize()
+
+            # Read actual step count from greedy generator
+            _gs = getattr(self.model.decoding, 'decoding', None)
+            _gs = getattr(_gs, 'greedy_search', None) if _gs else None
+            _dec_actual = getattr(_gs, '_last_actual_steps', -1) if _gs else -1
+            _dec_max_gen = getattr(_gs, '_last_max_gen', -1) if _gs else -1
 
         t_end = time.monotonic()
 
@@ -722,22 +746,44 @@ class DirectInferenceBatcher:
 
         # Timing
         if not hasattr(self, '_gpu_timing_accum'):
-            self._gpu_timing_accum = {"prep": 0.0, "step": 0.0, "n": 0, "items": 0}
-        self._gpu_timing_accum["prep"] += t_prep - t_start
-        self._gpu_timing_accum["step"] += t_end - t_prep
-        self._gpu_timing_accum["n"] += 1
-        self._gpu_timing_accum["items"] += batch_size
-        if self._gpu_timing_accum["n"] % 20 == 0:
-            a = self._gpu_timing_accum
+            self._gpu_timing_accum = {
+                "prep": 0.0, "preproc": 0.0, "enc": 0.0,
+                "dec": 0.0, "n": 0, "items": 0,
+                "actual_steps": 0, "max_gen": 0,
+            }
+        a = self._gpu_timing_accum
+        a["prep"] += t_prep - t_start
+        a["preproc"] += t_preproc - t_prep
+        a["enc"] += t_enc - t_preproc
+        a["dec"] += t_end - t_enc
+        a["n"] += 1
+        a["items"] += batch_size
+        a["actual_steps"] += _dec_actual
+        a["max_gen"] += _dec_max_gen
+        if a["n"] % 20 == 0:
             n = a["n"]
+            total = a["prep"] + a["preproc"] + a["enc"] + a["dec"]
+            dec_ms = a["dec"] / n * 1000
+            avg_steps = a["actual_steps"] / n
+            avg_max = a["max_gen"] / n
+            ms_per_step = dec_ms / avg_steps if avg_steps > 0 else 0
             logger.warning(
-                "GPU TIMING (last %d steps, %d items): "
-                "prep=%.1fms step=%.1fms total=%.1fms",
+                "GPU TIMING (%d batches, %d items): "
+                "prep=%.1fms mel=%.1fms enc=%.1fms dec=%.1fms "
+                "[%.0f/%.0f steps, %.1fms/step] | total=%.1fms",
                 n, a["items"],
-                a["prep"] / n * 1000, a["step"] / n * 1000,
-                (a["prep"] + a["step"]) / n * 1000,
+                a["prep"] / n * 1000,
+                a["preproc"] / n * 1000,
+                a["enc"] / n * 1000,
+                dec_ms,
+                avg_steps, avg_max, ms_per_step,
+                total / n * 1000,
             )
-            self._gpu_timing_accum = {"prep": 0.0, "step": 0.0, "n": 0, "items": 0}
+            self._gpu_timing_accum = {
+                "prep": 0.0, "preproc": 0.0, "enc": 0.0,
+                "dec": 0.0, "n": 0, "items": 0,
+                "actual_steps": 0, "max_gen": 0,
+            }
 
         if _gc_was_enabled:
             _gc.enable()

@@ -1,0 +1,4 @@
+Method,Name,Error,Occurrences
+POST,/transcribe/raw [realistic],CatchResponseError('HTTP 0'),6386
+POST,/transcribe/raw [burst],CatchResponseError('HTTP 0'),761
+POST,/transcribe/raw [fast],CatchResponseError('HTTP 0'),2495

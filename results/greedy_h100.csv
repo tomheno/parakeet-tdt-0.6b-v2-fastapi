@@ -1,0 +1,4 @@
+gpu,mode,concurrency,rps,p50_ms,p95_ms,p99_ms,rtfx_p50,cumulative_rtfx,errors,duration_s,notes
+H100 80GB HBM3,greedy,64,151,425,550,615,7.1,453,0,30,dynamic_beam enabled
+H100 80GB HBM3,greedy,256,307,733,1506,2500,4.1,921,0,30,dynamic_beam enabled
+H100 80GB HBM3,greedy,512,521,986,1102,1302,3.0,1563,0,30,dynamic_beam enabled; server-side eff_rps=513-520

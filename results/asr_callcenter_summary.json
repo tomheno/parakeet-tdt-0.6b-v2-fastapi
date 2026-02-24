@@ -1,0 +1,31 @@
+{
+  "benchmark_type": "callcenter_asr",
+  "timestamp": "2026-02-23T20:49:21.136452+00:00",
+  "config": {
+    "source_lang": "en",
+    "target_lang": "en",
+    "num_samples": 6,
+    "sample_durations": [
+      4.0403125,
+      1.8924375,
+      2.34525,
+      5.712125,
+      2.07725,
+      1.9425625
+    ]
+  },
+  "total_requests": 45220,
+  "failures": 24433,
+  "rps": 501.75,
+  "median_ms": 56,
+  "p95_ms": 1100.0,
+  "p99_ms": 2100.0,
+  "rtf_mean": 0.2766,
+  "rtf_median": 0.2397,
+  "rtf_p95": 0.6757,
+  "rtf_p99": 1.0803,
+  "total_audio_s": 62565.2,
+  "latency_mean_ms": 702.0,
+  "latency_median_ms": 582.0,
+  "latency_p95_ms": 1769.0
+}

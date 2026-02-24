@@ -1,0 +1,7 @@
+gpu,mode,concurrency,rps,p50_ms,p95_ms,p99_ms,rtfx_p50,cumulative_rtfx,errors,duration_s
+L40S 46GB,greedy,16,36,349,1141,2099,8.6,108,0,30
+L40S 46GB,greedy,32,67,473,610,1326,6.3,201,0,30
+L40S 46GB,greedy,64,100,521,1438,2358,5.8,300,0,30
+L40S 46GB,greedy,128,145,771,1609,3170,3.9,435,0,30
+L40S 46GB,greedy,256,188,1160,1905,4966,2.6,564,0,30
+L40S 46GB,greedy,512,273,1685,5253,6055,1.8,819,0,30
