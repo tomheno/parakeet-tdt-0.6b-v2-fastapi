@@ -59,10 +59,10 @@ _so_path = pathlib.Path(__file__).with_name("_fast_copy.so")
 if _so_path.exists():
     _fast_lib = ctypes.CDLL(str(_so_path))
     _fast_lib.batch_pad_copy.restype = None
-    _fast_lib.batch_pad_copy.argtypes = [_c_float_p, ctypes.c_int,
+    _fast_lib.batch_pad_copy.argtypes = [_c_float_p, ctypes.c_int, ctypes.c_int,
                                           _c_float_pp, _c_int_p, ctypes.c_int]
     _fast_lib.batch_pad_scatter.restype = None
-    _fast_lib.batch_pad_scatter.argtypes = [_c_float_p, ctypes.c_int,
+    _fast_lib.batch_pad_scatter.argtypes = [_c_float_p, ctypes.c_int, ctypes.c_int,
                                              _c_float_p, _c_longlong_p,
                                              _c_int_p, ctypes.c_int]
     logger.info("Loaded _fast_copy.so — GIL-free batch padding enabled")
@@ -610,7 +610,8 @@ class DirectInferenceBatcher:
                     PtrArr[i] = arr.ctypes.data_as(_c_float_p)
                 LenArr = (ctypes.c_int * batch_size)(*lengths)
                 dst_ptr = padded_np.ctypes.data_as(_c_float_p)
-                _fast_lib.batch_pad_copy(dst_ptr, max_len, PtrArr, LenArr, batch_size)
+                row_stride = self._max_audio_samples
+                _fast_lib.batch_pad_copy(dst_ptr, max_len, row_stride, PtrArr, LenArr, batch_size)
             else:
                 # Fallback: numpy loop
                 padded_np[:] = 0
